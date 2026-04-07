@@ -2,6 +2,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from bot.middleware import auth_check
 from services.execution.paper import broker
+from services.risk import risk
 
 async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await auth_check(update): return
@@ -13,6 +14,11 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         amount = float(ctx.args[1])
     except ValueError:
         await update.message.reply_text("Amount must be a number.")
+        return
+    positions = await broker.get_positions()
+    check = risk.check_trade(ticker, amount, positions)
+    if not check["approved"]:
+        await update.message.reply_text(f"Trade blocked: {check['reason']}")
         return
     r = await broker.buy(ticker, amount)
     if r["status"] == "error":
@@ -34,6 +40,7 @@ async def cmd_sell(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if r["status"] == "error":
         await update.message.reply_text(f"Sell failed: {r['reason']}")
     else:
+        risk.record_loss(r["pnl"])
         sign = "+" if r["pnl"] >= 0 else ""
         await update.message.reply_text(
             f"PAPER SELL filled\n"
