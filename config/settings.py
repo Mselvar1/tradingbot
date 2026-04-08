@@ -5,10 +5,12 @@ class Settings(BaseSettings):
     telegram_token: str
     anthropic_api_key: str
     newsapi_key: str
+    t212_api_key: Optional[str] = None
     database_url: Optional[str] = None
     redis_url: Optional[str] = None
     paper_mode: bool = True
     allowed_telegram_ids: str = ""
+    public_channel_id: str = ""
 
     @property
     def allowed_ids(self):
