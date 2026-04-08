@@ -2,8 +2,8 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from bot.middleware import auth_check
 from services.data.prices import get_intraday
-from services.data.news import get_news
 from services.data.macro import get_sector_news, get_geopolitical_news, get_market_sentiment
+from services.data.sentiment import get_market_context
 from claude.client import analyse
 from claude.prompts.analysis import ANALYSIS_PROMPT
 
@@ -18,6 +18,7 @@ async def cmd_analyze(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ticker_news = await get_sector_news(ticker)
     geo_news = await get_geopolitical_news()
     sentiment = await get_market_sentiment()
+    market_context = await get_market_context()
     ticker_news_text = "\n".join(
         f"- {a['title']} ({a['source']}, {a['published']})"
         for a in ticker_news
@@ -45,17 +46,21 @@ async def cmd_analyze(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         volume_ratio=pd.get("volume_ratio", 1),
         support=pd.get("support", 0),
         resistance=pd.get("resistance", 0),
+        sentiment=market_context.get("summary", "No sentiment data."),
         news=combined_news
     )
     r = await analyse(prompt)
     if "error" in r:
         await update.message.reply_text(f"Analysis failed: {r}")
         return
+    fg = market_context.get("fear_greed", {})
     msg = (
         f"*{ticker} Analysis*\n"
         f"Price: {pd.get('price',0)} ({pd.get('change_pct',0):+.2f}%)\n"
         f"RSI: {pd.get('rsi',50)} | Volume: {pd.get('volume_ratio',1)}x\n"
-        f"MA20: {pd.get('ma20',0)} | MA50: {pd.get('ma50',0)}\n\n"
+        f"MA20: {pd.get('ma20',0)} | MA50: {pd.get('ma50',0)}\n"
+        f"Fear & Greed: {fg.get('value',50)}/100 ({fg.get('label','Neutral')})\n"
+        f"VIX: {sentiment['vix']} — {sentiment['regime']}\n\n"
         f"Trend: {r.get('trend_direction','n/a')} ({r.get('trend_strength',0)}/100)\n"
         f"Confidence: {r.get('confidence_score',0)}/100\n"
         f"Action: {r.get('recommended_action','n/a')}\n"

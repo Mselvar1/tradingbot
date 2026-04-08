@@ -22,6 +22,9 @@ Volume ratio vs average: {volume_ratio}x
 Intraday support: {support}
 Intraday resistance: {resistance}
 
+MARKET SENTIMENT:
+{sentiment}
+
 NEWS AND MACRO CONTEXT:
 {news}
 
@@ -31,6 +34,9 @@ TECHNICAL INTERPRETATION RULES:
 - Price below MA20 and MA50 = downtrend
 - Volume ratio > 1.5 = strong move, < 0.5 = weak/ignore
 - ATR helps set realistic stop distances
+- Fear & Greed < 25 = extreme fear = potential long opportunity
+- Fear & Greed > 75 = extreme greed = potential short opportunity
+- High impact economic events = avoid trading 30 min before/after
 
 STOP LOSS RULES:
 - Place stop below intraday support level
@@ -44,6 +50,7 @@ TAKE PROFIT RULES:
 - TP2: second resistance or measured move (exit 30%)
 - TP3: extended target if momentum strong (exit 20%)
 - All TPs must be reachable within 2 days
+- Minimum R:R must be 1.5:1
 
 Return exactly this structure:
 {{
@@ -70,6 +77,8 @@ Return exactly this structure:
   "rsi_signal": "overbought or oversold or neutral",
   "volume_signal": "high or normal or low",
   "ma_signal": "above both MAs or below both MAs or mixed",
+  "sentiment_signal": "fear or greed or neutral",
+  "high_impact_event_risk": "yes or no",
   "analysis_summary": "2-3 sentence thesis for day/swing trade",
   "recommended_action": "buy or sell or watch or avoid",
   "time_horizon": "intraday or 1-day or 2-day max",
@@ -102,6 +111,7 @@ News catalyst: {news_catalyst}
 Current Price: {price}
 RSI: {rsi}
 Volume ratio: {volume_ratio}x
+Sentiment: {sentiment}
 Recent News: {news}
 
 Ask yourself:
@@ -110,7 +120,8 @@ Ask yourself:
 3. Is the risk/reward at least 1.5:1?
 4. Does RSI confirm the direction?
 5. Is volume confirming the move?
-6. Is there a clear catalyst?
+6. Does market sentiment support this trade?
+7. Are there any high impact events that could invalidate this?
 
 Return ONLY valid JSON:
 {{
@@ -124,8 +135,9 @@ Return ONLY valid JSON:
   "risk_reward_valid": true or false,
   "rsi_confirms": true or false,
   "volume_confirms": true or false,
+  "sentiment_confirms": true or false,
   "concerns": ["list any concerns"],
-  "best_entry_time": "specific time or condition e.g. market open, pullback to support",
+  "best_entry_time": "specific time or condition",
   "review_summary": "1-2 sentence final verdict for a day/swing trader"
 }}
 """

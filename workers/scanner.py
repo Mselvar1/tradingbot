@@ -3,6 +3,7 @@ from services.watchlist import watchlist
 from services.data.prices import get_price, get_intraday
 from services.data.news import get_news
 from services.data.macro import get_geopolitical_news, get_market_sentiment, get_sector_news
+from services.data.sentiment import get_market_context
 from services.risk import risk
 from services.signal_history import history
 from claude.client import analyse, review_signal
@@ -24,7 +25,7 @@ async def has_momentum(pd: dict) -> bool:
         return True
     return False
 
-async def deep_scan_ticker(ticker: str) -> dict | None:
+async def deep_scan_ticker(ticker: str, market_context: dict) -> dict | None:
     if risk.kill_switch:
         return None
     try:
@@ -60,20 +61,23 @@ async def deep_scan_ticker(ticker: str) -> dict | None:
             f"MARKET REGIME: VIX {sentiment['vix']} — {sentiment['regime']}"
         )
 
+        sentiment_text = market_context.get("summary", "No sentiment data.")
+
         prompt = ANALYSIS_PROMPT.format(
             ticker=ticker,
-            price=pd["price"],
-            prev_close=pd.get("prev_close", pd["price"]),
+            price=pd.get("price", 0),
+            prev_close=pd.get("prev_close", 0),
             change_pct=pd.get("change_pct", 0),
             rsi=pd.get("rsi", 50),
-            ma20=pd.get("ma20", pd["price"]),
-            ma50=pd.get("ma50", pd["price"]),
-            day_high=pd.get("day_high", pd["price"]),
-            day_low=pd.get("day_low", pd["price"]),
+            ma20=pd.get("ma20", 0),
+            ma50=pd.get("ma50", 0),
+            day_high=pd.get("day_high", 0),
+            day_low=pd.get("day_low", 0),
             atr=pd.get("atr", 0),
             volume_ratio=pd.get("volume_ratio", 1),
-            support=pd.get("support", pd["price"]),
-            resistance=pd.get("resistance", pd["price"]),
+            support=pd.get("support", 0),
+            resistance=pd.get("resistance", 0),
+            sentiment=sentiment_text,
             news=combined_news
         )
 
@@ -112,9 +116,10 @@ async def deep_scan_ticker(ticker: str) -> dict | None:
             summary=result.get("analysis_summary", "n/a"),
             invalidation=result.get("invalidation", "n/a"),
             news_catalyst=result.get("news_catalyst", "n/a"),
-            price=pd["price"],
+            price=pd.get("price", 0),
             rsi=pd.get("rsi", 50),
             volume_ratio=pd.get("volume_ratio", 1),
+            sentiment=sentiment_text,
             news=combined_news
         )
 
@@ -141,7 +146,7 @@ async def deep_scan_ticker(ticker: str) -> dict | None:
             "action": action,
             "confidence": final_confidence,
             "timeframe": result.get("timeframe", "n/a"),
-            "price": pd["price"],
+            "price": pd.get("price", 0),
             "change_pct": pd.get("change_pct", 0),
             "rsi": pd.get("rsi", 50),
             "volume_ratio": pd.get("volume_ratio", 1),
@@ -160,11 +165,15 @@ async def deep_scan_ticker(ticker: str) -> dict | None:
             "rsi_signal": result.get("rsi_signal", "n/a"),
             "volume_signal": result.get("volume_signal", "n/a"),
             "ma_signal": result.get("ma_signal", "n/a"),
+            "sentiment_signal": result.get("sentiment_signal", "n/a"),
+            "high_impact_event_risk": result.get("high_impact_event_risk", "no"),
             "summary": result.get("analysis_summary", ""),
             "invalidation": result.get("invalidation", ""),
             "news_catalyst": result.get("news_catalyst", "none"),
             "vix": sentiment["vix"],
             "regime": sentiment["regime"],
+            "fear_greed": market_context.get("fear_greed", {}).get("value", 50),
+            "fear_greed_label": market_context.get("fear_greed", {}).get("label", "Neutral"),
             "concerns": review.get("concerns", []),
             "best_entry_time": review.get("best_entry_time", "n/a"),
             "review_summary": review.get("review_summary", "")
@@ -179,15 +188,20 @@ async def format_signal(signal: dict) -> str:
     concerns = ""
     if signal["concerns"]:
         concerns = "\nConcerns: " + " | ".join(signal["concerns"])
+    event_warning = ""
+    if signal.get("high_impact_event_risk") == "yes":
+        event_warning = "\nHIGH IMPACT EVENT RISK — check calendar before entry"
     return (
         f"SIGNAL — {signal['ticker']} {action}\n"
         f"Confidence: {signal['confidence']}/100\n"
         f"Timeframe: {signal['timeframe']}\n"
-        f"Market: VIX {signal['vix']} — {signal['regime']}\n\n"
+        f"Market: VIX {signal['vix']} — {signal['regime']}\n"
+        f"Fear & Greed: {signal['fear_greed']}/100 ({signal['fear_greed_label']})\n\n"
         f"PRICE: {signal['price']} ({signal['change_pct']:+.2f}%)\n"
         f"RSI: {signal['rsi']} — {signal['rsi_signal']}\n"
         f"Volume: {signal['volume_ratio']}x — {signal['volume_signal']}\n"
-        f"MA signal: {signal['ma_signal']}\n\n"
+        f"MA signal: {signal['ma_signal']}\n"
+        f"Sentiment: {signal['sentiment_signal']}\n\n"
         f"ENTRY: {signal['entry']}\n"
         f"Trigger: {signal['entry_trigger']}\n\n"
         f"STOP LOSS: {signal['stop_loss']} (-{signal['stop_loss_pct']}%)\n"
@@ -201,7 +215,8 @@ async def format_signal(signal: dict) -> str:
         f"Invalidation: {signal['invalidation']}\n"
         f"Best entry: {signal['best_entry_time']}\n"
         f"Review: {signal['review_summary']}"
-        f"{concerns}\n\n"
+        f"{concerns}"
+        f"{event_warning}\n\n"
         f"Use /buy {signal['ticker']} [amount] to act."
     )
 
@@ -211,8 +226,10 @@ async def run_scanner(bot, chat_id: int):
         try:
             tickers = watchlist.get()
             print(f"Scanning {len(tickers)} tickers...")
+            market_context = await get_market_context()
+            print(f"Fear & Greed: {market_context['fear_greed']['value']} — {market_context['fear_greed']['label']}")
             for ticker in tickers:
-                signal = await deep_scan_ticker(ticker)
+                signal = await deep_scan_ticker(ticker, market_context)
                 if signal:
                     msg = await format_signal(signal)
                     await bot.send_message(chat_id=chat_id, text=msg)
