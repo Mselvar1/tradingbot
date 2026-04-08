@@ -203,39 +203,64 @@ async def deep_scan_ticker(ticker: str, market_context: dict) -> dict | None:
 
 async def format_signal(signal: dict) -> str:
     action = "BUY" if signal["action"] == "buy" else "SELL"
-    concerns = ""
-    if signal["concerns"]:
-        concerns = "\nConcerns: " + " | ".join(signal["concerns"])
+    action_arrow = "↑" if signal["action"] == "buy" else "↓"
+    
+    confidence = signal["confidence"]
+    if confidence >= 85:
+        confidence_label = "Very High"
+    elif confidence >= 75:
+        confidence_label = "High"
+    elif confidence >= 70:
+        confidence_label = "Moderate"
+    else:
+        confidence_label = "Low"
+
     event_warning = ""
     if signal.get("high_impact_event_risk") == "yes":
-        event_warning = "\nHIGH IMPACT EVENT RISK — check calendar before entry"
+        event_warning = "\n⚠️ HIGH IMPACT EVENT THIS WEEK — size down"
+
+    concerns_text = ""
+    if signal["concerns"]:
+        concerns_text = "\nNotes: " + " | ".join(signal["concerns"])
+
     return (
-        f"SIGNAL — {signal['ticker']} {action}\n"
-        f"Confidence: {signal['confidence']}/100\n"
-        f"Timeframe: {signal['timeframe']}\n"
-        f"Market: VIX {signal['vix']} — {signal['regime']}\n"
-        f"Fear & Greed: {signal['fear_greed']}/100 ({signal['fear_greed_label']})\n\n"
-        f"PRICE: {signal['price']} ({signal['change_pct']:+.2f}%)\n"
+        f"───────────────────\n"
+        f"DUTCHALPHA SIGNAL\n"
+        f"───────────────────\n"
+        f"{action_arrow} {signal['ticker']} — {action}\n"
+        f"Confidence: {confidence}/100 ({confidence_label})\n"
+        f"Timeframe: {signal['timeframe']}\n\n"
+        f"MARKET CONDITIONS\n"
+        f"VIX: {signal['vix']} — {signal['regime']}\n"
+        f"Fear & Greed: {signal['fear_greed']}/100 ({signal['fear_greed_label']})\n"
         f"RSI: {signal['rsi']} — {signal['rsi_signal']}\n"
         f"Volume: {signal['volume_ratio']}x — {signal['volume_signal']}\n"
-        f"MA signal: {signal['ma_signal']}\n"
-        f"Sentiment: {signal['sentiment_signal']}\n\n"
-        f"ENTRY: {signal['entry']}\n"
-        f"Trigger: {signal['entry_trigger']}\n\n"
-        f"STOP LOSS: {signal['stop_loss']} (-{signal['stop_loss_pct']}%)\n"
-        f"Reason: {signal['stop_loss_reason']}\n\n"
-        f"TP1: {signal['tp1']} (+{signal['tp1_pct']}%) — exit 50%\n"
-        f"TP2: {signal['tp2']} (+{signal['tp2_pct']}%) — exit 30%\n"
-        f"TP3: {signal['tp3']} (+{signal['tp3_pct']}%) — exit 20%\n"
-        f"R:R: {signal['rr']}\n\n"
-        f"Catalyst: {signal['news_catalyst']}\n\n"
-        f"Analysis: {signal['summary']}\n\n"
-        f"Invalidation: {signal['invalidation']}\n"
-        f"Best entry: {signal['best_entry_time']}\n"
-        f"Review: {signal['review_summary']}"
-        f"{concerns}"
+        f"Trend: {signal['ma_signal']}\n\n"
+        f"ENTRY\n"
+        f"Zone: {signal['entry']}\n"
+        f"Trigger: {signal['entry_trigger']}\n"
+        f"Best time: {signal['best_entry_time']}\n\n"
+        f"RISK MANAGEMENT\n"
+        f"Stop Loss: {signal['stop_loss']} (-{signal['stop_loss_pct']}%)\n"
+        f"Why: {signal['stop_loss_reason']}\n\n"
+        f"TARGETS\n"
+        f"TP1: {signal['tp1']} (+{signal['tp1_pct']}%) — close 50%\n"
+        f"TP2: {signal['tp2']} (+{signal['tp2_pct']}%) — close 30%\n"
+        f"TP3: {signal['tp3']} (+{signal['tp3_pct']}%) — close 20%\n"
+        f"Risk/Reward: {signal['rr']}\n\n"
+        f"ANALYSIS\n"
+        f"Catalyst: {signal['news_catalyst']}\n"
+        f"{signal['summary']}\n\n"
+        f"INVALIDATION\n"
+        f"Exit if: {signal['invalidation']}\n"
+        f"Reviewer: {signal['review_summary']}"
+        f"{concerns_text}"
         f"{event_warning}\n\n"
-        f"Use /buy {signal['ticker']} [amount] to act."
+        f"Use /buy {signal['ticker']} [amount] to act.\n"
+        f"───────────────────\n"
+        f"DutchAlpha — AI Trading Signals\n"
+        f"Trade smart. Manage risk always.\n"
+        f"───────────────────"
     )
 
 async def run_scanner(bot, chat_id: int):

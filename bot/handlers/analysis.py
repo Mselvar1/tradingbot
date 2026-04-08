@@ -75,8 +75,12 @@ async def cmd_analyze(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"R:R: {r.get('risk_reward','n/a')}\n\n"
         f"Catalyst: {r.get('news_catalyst','none')}\n\n"
         f"{r.get('analysis_summary','')}\n\n"
-        f"Invalidation: {r.get('invalidation','n/a')}"
-    )
+        f"Invalidation: {r.get('invalidation','n/a')}\n\n"
+        f"───────────────────\n"
+        f"DutchAlpha — AI Trading Signals\n"
+        f"Trade smart. Manage risk always.\n"
+        f"───────────────────"
+         )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def cmd_news(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
