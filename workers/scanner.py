@@ -11,6 +11,14 @@ CONFIDENCE_THRESHOLD = 65
 REVIEW_THRESHOLD = 70
 CHECK_INTERVAL = 900
 
+async def has_momentum(ticker: str, price_data: dict) -> bool:
+    price = price_data.get("price", 0)
+    prev = price_data.get("prev_close", 0)
+    if price == 0 or prev == 0:
+        return False
+    change_pct = abs((price - prev) / prev * 100)
+    return change_pct > 0.5
+
 async def deep_scan_ticker(ticker: str) -> dict | None:
     if risk.kill_switch:
         return None
@@ -19,9 +27,13 @@ async def deep_scan_ticker(ticker: str) -> dict | None:
         if pd["price"] == 0:
             return None
 
+        if not await has_momentum(ticker, pd):
+            print(f"{ticker}: no momentum — skipped")
+            return None
+
         sentiment = await get_market_sentiment()
         if sentiment["risk_off"]:
-            print(f"Risk-off mode active (VIX {sentiment['vix']}), skipping {ticker}")
+            print(f"Risk-off mode (VIX {sentiment['vix']}), skipping {ticker}")
             return None
 
         ticker_news = await get_sector_news(ticker)
@@ -100,11 +112,12 @@ async def deep_scan_ticker(ticker: str) -> dict | None:
 
         final_confidence = review.get("final_confidence", confidence)
         if final_confidence < REVIEW_THRESHOLD:
-            print(f"{ticker}: final confidence {final_confidence}/100 too low — skipped")
+            print(f"{ticker}: final confidence {final_confidence}/100 — skipped")
             return None
 
         sl = review.get("stop_loss_adjustment") or result.get("stop_loss", "n/a")
-        sl_reason = review.get("stop_loss_adjustment_reason") or result.get("stop_loss_reason", "n/a")
+        sl_reason = (review.get("stop_loss_adjustment_reason")
+                     or result.get("stop_loss_reason", "n/a"))
 
         return {
             "ticker": ticker,
@@ -142,7 +155,6 @@ async def format_signal(signal: dict) -> str:
     concerns = ""
     if signal["concerns"]:
         concerns = "\nConcerns: " + " | ".join(signal["concerns"])
-
     return (
         f"SIGNAL — {signal['ticker']} {action_emoji}\n"
         f"Confidence: {signal['confidence']}/100\n"
@@ -175,12 +187,9 @@ async def run_scanner(bot, chat_id: int):
                 signal = await deep_scan_ticker(ticker)
                 if signal:
                     msg = await format_signal(signal)
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=msg
-                    )
+                    await bot.send_message(chat_id=chat_id, text=msg)
                 await asyncio.sleep(3)
         except Exception as e:
             print(f"Scanner loop error: {e}")
-        print(f"Scan complete. Next scan in 15 minutes.")
+        print("Scan complete. Next scan in 15 minutes.")
         await asyncio.sleep(CHECK_INTERVAL)
