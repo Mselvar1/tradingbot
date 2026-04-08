@@ -1,6 +1,6 @@
 class Watchlist:
     def __init__(self):
-        self.tickers = ["AAPL", "NVDA", "TSLA", "MSFT", "BTC-USD"]
+        self.tickers = ["NVDA", "BTC-USD", "XAUUSD=X"]
 
     def add(self, ticker: str):
         ticker = ticker.upper()
