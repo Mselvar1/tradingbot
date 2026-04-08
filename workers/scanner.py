@@ -9,9 +9,24 @@ from services.signal_history import history
 from claude.client import analyse, review_signal
 from claude.prompts.analysis import ANALYSIS_PROMPT, REVIEW_PROMPT
 
-CONFIDENCE_THRESHOLD = 65
-REVIEW_THRESHOLD = 70
+CONFIDENCE_THRESHOLD = 70
+REVIEW_THRESHOLD = 72
 CHECK_INTERVAL = 900
+
+import datetime
+
+def is_market_hours(ticker: str) -> bool:
+    now = datetime.datetime.utcnow()
+    weekday = now.weekday()
+    hour = now.hour
+    minute = now.minute
+    if ticker in ["BTC-USD", "ETH-USD"]:
+        return True
+    if weekday >= 5:
+        return False
+    market_open = hour > 13 or (hour == 13 and minute >= 30)
+    market_close = hour < 20
+    return market_open and market_close
 
 async def has_momentum(pd: dict) -> bool:
     change_pct = abs(pd.get("change_pct", 0))
@@ -27,6 +42,9 @@ async def has_momentum(pd: dict) -> bool:
 
 async def deep_scan_ticker(ticker: str, market_context: dict) -> dict | None:
     if risk.kill_switch:
+        return None
+    if not is_market_hours(ticker):
+        print(f"{ticker}: market closed — skipped")
         return None
     try:
         pd = await get_intraday(ticker)
