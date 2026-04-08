@@ -115,31 +115,42 @@ async def deep_scan_ticker(ticker: str, market_context: dict) -> dict | None:
         print(f"{ticker}: first check passed ({confidence}/100) — reviewing...")
 
         review_prompt = REVIEW_PROMPT.format(
-            ticker=ticker,
-            action=action,
-            entry=result.get("entry_zone", "n/a"),
-            entry_trigger=result.get("entry_trigger", "n/a"),
-            stop_loss=result.get("stop_loss", "n/a"),
-            stop_loss_pct=result.get("stop_loss_pct", "n/a"),
-            stop_loss_reason=result.get("stop_loss_reason", "n/a"),
-            tp1=result.get("take_profit_1", "n/a"),
-            tp1_pct=result.get("take_profit_1_pct", "n/a"),
-            tp2=result.get("take_profit_2", "n/a"),
-            tp2_pct=result.get("take_profit_2_pct", "n/a"),
-            tp3=result.get("take_profit_3", "n/a"),
-            tp3_pct=result.get("take_profit_3_pct", "n/a"),
-            rr=result.get("risk_reward", "n/a"),
-            timeframe=result.get("timeframe", "n/a"),
-            confidence=confidence,
-            summary=result.get("analysis_summary", "n/a"),
-            invalidation=result.get("invalidation", "n/a"),
-            news_catalyst=result.get("news_catalyst", "n/a"),
-            price=pd.get("price", 0),
-            rsi=pd.get("rsi", 50),
-            volume_ratio=pd.get("volume_ratio", 1),
-            sentiment=sentiment_text,
-            news=combined_news
-        )
+    ticker=ticker,
+    action=action,
+    market_structure=result.get("market_structure", "unknown"),
+    bos_detected=result.get("bos_detected", False),
+    choch_detected=result.get("choch_detected", False),
+    fvg_present=result.get("fvg_present", False),
+    fvg_zone=result.get("fvg_zone", "none"),
+    order_block_present=result.get("order_block_present", False),
+    order_block_zone=result.get("order_block_zone", "none"),
+    liquidity_sweep_detected=result.get("liquidity_sweep_detected", False),
+    session_context=result.get("session_context", "unknown"),
+    confluences=result.get("confluences", []),
+    trading_verdict=result.get("trading_verdict", "WAIT"),
+    entry=result.get("entry_zone", "n/a"),
+    entry_trigger=result.get("entry_trigger", "n/a"),
+    stop_loss=result.get("stop_loss", "n/a"),
+    stop_loss_pct=result.get("stop_loss_pct", "n/a"),
+    stop_loss_reason=result.get("stop_loss_reason", "n/a"),
+    tp1=result.get("take_profit_1", "n/a"),
+    tp1_pct=result.get("take_profit_1_pct", "n/a"),
+    tp2=result.get("take_profit_2", "n/a"),
+    tp2_pct=result.get("take_profit_2_pct", "n/a"),
+    tp3=result.get("take_profit_3", "n/a"),
+    tp3_pct=result.get("take_profit_3_pct", "n/a"),
+    rr=result.get("risk_reward", "n/a"),
+    timeframe=result.get("timeframe", "n/a"),
+    confidence=confidence,
+    summary=result.get("analysis_summary", "n/a"),
+    invalidation=result.get("invalidation", "n/a"),
+    news_catalyst=result.get("news_catalyst", "n/a"),
+    price=pd.get("price", 0),
+    rsi=pd.get("rsi", 50),
+    volume_ratio=pd.get("volume_ratio", 1),
+    sentiment=sentiment_text,
+    news=combined_news
+)
 
         review = await review_signal(review_prompt)
 
@@ -165,6 +176,20 @@ async def deep_scan_ticker(ticker: str, market_context: dict) -> dict | None:
             "confidence": final_confidence,
             "timeframe": result.get("timeframe", "n/a"),
             "price": pd.get("price", 0),
+            "trading_verdict": result.get("trading_verdict", "WAIT"),
+            "verdict_reason": result.get("verdict_reason", ""),
+            "risk_comment": result.get("risk_comment", ""),
+            "market_structure": result.get("market_structure", "unknown"),
+            "bos_detected": result.get("bos_detected", False),
+            "choch_detected": result.get("choch_detected", False),
+            "fvg_present": result.get("fvg_present", False),
+            "fvg_zone": result.get("fvg_zone", None),
+            "order_block_present": result.get("order_block_present", False),
+            "order_block_zone": result.get("order_block_zone", None),
+            "liquidity_sweep_detected": result.get("liquidity_sweep_detected", False),
+            "session_context": result.get("session_context", "unknown"),
+            "confluences": result.get("confluences", []),
+            "final_verdict": review.get("final_verdict", "TAKE TRADE"),
             "change_pct": pd.get("change_pct", 0),
             "rsi": pd.get("rsi", 50),
             "volume_ratio": pd.get("volume_ratio", 1),
@@ -203,46 +228,62 @@ async def deep_scan_ticker(ticker: str, market_context: dict) -> dict | None:
 
 async def format_signal(signal: dict) -> str:
     action = "BUY" if signal["action"] == "buy" else "SELL"
-    action_arrow = "↑" if signal["action"] == "buy" else "↓"
-    
-    confidence = signal["confidence"]
-    if confidence >= 85:
-        confidence_label = "Very High"
-    elif confidence >= 75:
-        confidence_label = "High"
-    elif confidence >= 70:
-        confidence_label = "Moderate"
-    else:
-        confidence_label = "Low"
+    verdict = signal.get("trading_verdict", action)
+    verdict_reason = signal.get("verdict_reason", "")
+    risk_comment = signal.get("risk_comment", "")
+
+    confluences = signal.get("confluences", [])
+    confluences_text = " | ".join(confluences) if confluences else "none detected"
+
+    smc_text = ""
+    if signal.get("fvg_present"):
+        smc_text += f"FVG zone: {signal.get('fvg_zone', 'n/a')}\n"
+    if signal.get("order_block_present"):
+        smc_text += f"Order block: {signal.get('order_block_zone', 'n/a')}\n"
+    if signal.get("liquidity_sweep_detected"):
+        smc_text += "Liquidity sweep detected\n"
+    if signal.get("bos_detected"):
+        smc_text += "Break of Structure confirmed\n"
+    if signal.get("choch_detected"):
+        smc_text += "Change of Character detected\n"
 
     event_warning = ""
     if signal.get("high_impact_event_risk") == "yes":
-        event_warning = "\n⚠️ HIGH IMPACT EVENT THIS WEEK — size down"
+        event_warning = "\nHIGH IMPACT EVENT — reduce size or wait"
 
     concerns_text = ""
-    if signal["concerns"]:
-        concerns_text = "\nNotes: " + " | ".join(signal["concerns"])
+    if signal.get("concerns"):
+        concerns_text = "\nConcerns: " + " | ".join(signal["concerns"])
+
+    final_verdict = signal.get("final_verdict", "TAKE TRADE")
 
     return (
         f"───────────────────\n"
         f"DUTCHALPHA SIGNAL\n"
         f"───────────────────\n"
-        f"{action_arrow} {signal['ticker']} — {action}\n"
-        f"Confidence: {confidence}/100 ({confidence_label})\n"
-        f"Timeframe: {signal['timeframe']}\n\n"
+        f"{signal['ticker']} — {verdict}\n"
+        f"{verdict_reason}\n\n"
+        f"VERDICT: {final_verdict}\n"
+        f"Confidence: {signal['confidence']}/100\n"
+        f"Timeframe: {signal['timeframe']}\n"
+        f"Session: {signal.get('session_context', 'n/a').upper()}\n\n"
         f"MARKET CONDITIONS\n"
+        f"Structure: {signal.get('market_structure', 'n/a').upper()}\n"
         f"VIX: {signal['vix']} — {signal['regime']}\n"
         f"Fear & Greed: {signal['fear_greed']}/100 ({signal['fear_greed_label']})\n"
         f"RSI: {signal['rsi']} — {signal['rsi_signal']}\n"
-        f"Volume: {signal['volume_ratio']}x — {signal['volume_signal']}\n"
-        f"Trend: {signal['ma_signal']}\n\n"
+        f"Volume: {signal['volume_ratio']}x — {signal['volume_signal']}\n\n"
+        f"SMC CONFLUENCES\n"
+        f"{confluences_text}\n"
+        f"{smc_text}\n"
         f"ENTRY\n"
         f"Zone: {signal['entry']}\n"
         f"Trigger: {signal['entry_trigger']}\n"
         f"Best time: {signal['best_entry_time']}\n\n"
         f"RISK MANAGEMENT\n"
         f"Stop Loss: {signal['stop_loss']} (-{signal['stop_loss_pct']}%)\n"
-        f"Why: {signal['stop_loss_reason']}\n\n"
+        f"Why: {signal['stop_loss_reason']}\n"
+        f"Advice: {risk_comment}\n\n"
         f"TARGETS\n"
         f"TP1: {signal['tp1']} (+{signal['tp1_pct']}%) — close 50%\n"
         f"TP2: {signal['tp2']} (+{signal['tp2_pct']}%) — close 30%\n"
@@ -252,8 +293,8 @@ async def format_signal(signal: dict) -> str:
         f"Catalyst: {signal['news_catalyst']}\n"
         f"{signal['summary']}\n\n"
         f"INVALIDATION\n"
-        f"Exit if: {signal['invalidation']}\n"
-        f"Reviewer: {signal['review_summary']}"
+        f"{signal['invalidation']}\n\n"
+        f"REVIEWER: {signal['review_summary']}"
         f"{concerns_text}"
         f"{event_warning}\n\n"
         f"Use /buy {signal['ticker']} [amount] to act.\n"

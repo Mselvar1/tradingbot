@@ -54,21 +54,39 @@ async def cmd_analyze(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Analysis failed: {r}")
         return
     fg = market_context.get("fear_greed", {})
+    confluences = r.get("confluences", [])
+    confluences_text = " | ".join(confluences) if confluences else "none"
+    smc_text = ""
+    if r.get("fvg_present"):
+        smc_text += f"\nFVG zone: {r.get('fvg_zone','n/a')}"
+    if r.get("order_block_present"):
+        smc_text += f"\nOrder block: {r.get('order_block_zone','n/a')}"
+    if r.get("liquidity_sweep_detected"):
+        smc_text += "\nLiquidity sweep detected"
+    if r.get("bos_detected"):
+        smc_text += "\nBOS confirmed"
+    if r.get("choch_detected"):
+        smc_text += "\nCHoCH detected"
+
     msg = (
-        f"*{ticker} Analysis*\n"
+        f"*{ticker} — {r.get('trading_verdict','n/a')}*\n"
+        f"{r.get('verdict_reason','')}\n\n"
         f"Price: {pd.get('price',0)} ({pd.get('change_pct',0):+.2f}%)\n"
         f"RSI: {pd.get('rsi',50)} | Volume: {pd.get('volume_ratio',1)}x\n"
-        f"MA20: {pd.get('ma20',0)} | MA50: {pd.get('ma50',0)}\n"
+        f"Structure: {r.get('market_structure','n/a').upper()}\n"
+        f"Session: {r.get('session_context','n/a').upper()}\n"
         f"Fear & Greed: {fg.get('value',50)}/100 ({fg.get('label','Neutral')})\n"
         f"VIX: {sentiment['vix']} — {sentiment['regime']}\n\n"
-        f"Trend: {r.get('trend_direction','n/a')} ({r.get('trend_strength',0)}/100)\n"
+        f"Confluences: {confluences_text}"
+        f"{smc_text}\n\n"
         f"Confidence: {r.get('confidence_score',0)}/100\n"
         f"Action: {r.get('recommended_action','n/a')}\n"
         f"Timeframe: {r.get('time_horizon','n/a')}\n\n"
         f"Entry: {r.get('entry_zone','n/a')}\n"
         f"Trigger: {r.get('entry_trigger','n/a')}\n\n"
         f"Stop: {r.get('stop_loss','n/a')} (-{r.get('stop_loss_pct','n/a')}%)\n"
-        f"Reason: {r.get('stop_loss_reason','n/a')}\n\n"
+        f"Reason: {r.get('stop_loss_reason','n/a')}\n"
+        f"Risk advice: {r.get('risk_comment','n/a')}\n\n"
         f"TP1: {r.get('take_profit_1','n/a')} (+{r.get('take_profit_1_pct','n/a')}%)\n"
         f"TP2: {r.get('take_profit_2','n/a')} (+{r.get('take_profit_2_pct','n/a')}%)\n"
         f"TP3: {r.get('take_profit_3','n/a')} (+{r.get('take_profit_3_pct','n/a')}%)\n"
@@ -80,7 +98,7 @@ async def cmd_analyze(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"DutchAlpha — AI Trading Signals\n"
         f"Trade smart. Manage risk always.\n"
         f"───────────────────"
-         )
+    )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def cmd_news(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
