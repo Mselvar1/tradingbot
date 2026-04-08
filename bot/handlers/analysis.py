@@ -1,29 +1,51 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from bot.middleware import auth_check
-from services.data.prices import get_price
+from services.data.prices import get_intraday
 from services.data.news import get_news
+from services.data.macro import get_sector_news, get_geopolitical_news, get_market_sentiment
 from claude.client import analyse
 from claude.prompts.analysis import ANALYSIS_PROMPT
 
 async def cmd_analyze(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await auth_check(update): return
     if not ctx.args:
-        await update.message.reply_text("Usage: /analyze AAPL")
+        await update.message.reply_text("Usage: /analyze NVDA")
         return
     ticker = ctx.args[0].upper()
     await update.message.reply_text(f"Analysing {ticker}...")
-    pd = await get_price(ticker)
-    articles = await get_news(ticker)
-    news_text = "\n".join(
+    pd = await get_intraday(ticker)
+    ticker_news = await get_sector_news(ticker)
+    geo_news = await get_geopolitical_news()
+    sentiment = await get_market_sentiment()
+    ticker_news_text = "\n".join(
         f"- {a['title']} ({a['source']}, {a['published']})"
-        for a in articles
-    ) or "No recent news found."
+        for a in ticker_news
+    ) or "No recent news."
+    geo_text = "\n".join(
+        f"- [{a['category'].upper()}] {a['title']} ({a['source']})"
+        for a in geo_news[:5]
+    ) or "No geopolitical news."
+    combined_news = (
+        f"ASSET NEWS:\n{ticker_news_text}\n\n"
+        f"MACRO & GEOPOLITICAL:\n{geo_text}\n\n"
+        f"MARKET REGIME: VIX {sentiment['vix']} — {sentiment['regime']}"
+    )
     prompt = ANALYSIS_PROMPT.format(
         ticker=ticker,
-        price=pd["price"],
-        prev_close=pd["prev_close"],
-        news=news_text
+        price=pd.get("price", 0),
+        prev_close=pd.get("prev_close", 0),
+        change_pct=pd.get("change_pct", 0),
+        rsi=pd.get("rsi", 50),
+        ma20=pd.get("ma20", 0),
+        ma50=pd.get("ma50", 0),
+        day_high=pd.get("day_high", 0),
+        day_low=pd.get("day_low", 0),
+        atr=pd.get("atr", 0),
+        volume_ratio=pd.get("volume_ratio", 1),
+        support=pd.get("support", 0),
+        resistance=pd.get("resistance", 0),
+        news=combined_news
     )
     r = await analyse(prompt)
     if "error" in r:
@@ -31,23 +53,34 @@ async def cmd_analyze(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     msg = (
         f"*{ticker} Analysis*\n"
-        f"Trend: {r.get('trend_direction','n/a')} "
-        f"({r.get('trend_strength',0)}/100)\n"
+        f"Price: {pd.get('price',0)} ({pd.get('change_pct',0):+.2f}%)\n"
+        f"RSI: {pd.get('rsi',50)} | Volume: {pd.get('volume_ratio',1)}x\n"
+        f"MA20: {pd.get('ma20',0)} | MA50: {pd.get('ma50',0)}\n\n"
+        f"Trend: {r.get('trend_direction','n/a')} ({r.get('trend_strength',0)}/100)\n"
         f"Confidence: {r.get('confidence_score',0)}/100\n"
         f"Action: {r.get('recommended_action','n/a')}\n"
+        f"Timeframe: {r.get('time_horizon','n/a')}\n\n"
         f"Entry: {r.get('entry_zone','n/a')}\n"
-        f"Stop: {r.get('stop_loss','n/a')}\n"
+        f"Trigger: {r.get('entry_trigger','n/a')}\n\n"
+        f"Stop: {r.get('stop_loss','n/a')} (-{r.get('stop_loss_pct','n/a')}%)\n"
+        f"Reason: {r.get('stop_loss_reason','n/a')}\n\n"
+        f"TP1: {r.get('take_profit_1','n/a')} (+{r.get('take_profit_1_pct','n/a')}%)\n"
+        f"TP2: {r.get('take_profit_2','n/a')} (+{r.get('take_profit_2_pct','n/a')}%)\n"
+        f"TP3: {r.get('take_profit_3','n/a')} (+{r.get('take_profit_3_pct','n/a')}%)\n"
         f"R:R: {r.get('risk_reward','n/a')}\n\n"
-        f"{r.get('analysis_summary','')}"
+        f"Catalyst: {r.get('news_catalyst','none')}\n\n"
+        f"{r.get('analysis_summary','')}\n\n"
+        f"Invalidation: {r.get('invalidation','n/a')}"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def cmd_news(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await auth_check(update): return
     if not ctx.args:
-        await update.message.reply_text("Usage: /news TSLA")
+        await update.message.reply_text("Usage: /news NVDA")
         return
     topic = " ".join(ctx.args)
+    from services.data.news import get_news
     articles = await get_news(topic)
     if not articles:
         await update.message.reply_text("No recent news found.")
