@@ -5,26 +5,44 @@ Analyse {ticker} and return ONLY valid JSON. No text outside the JSON.
 TRADING STYLE:
 - Day trading and swing trading only
 - Maximum hold time: 2 days
-- No long-term investment thesis
 - Focus on: momentum, breakouts, news catalysts, technical setups
-- Preferred timeframe: 15min, 1hr, 4hr charts
-- Must have clear entry, stop and target within 2-day window
+- Preferred timeframe: 5min, 15min, 1hr charts
 
+TECHNICAL DATA:
 Current price: {price}
 Previous close: {prev_close}
-Recent news and macro context: {news}
+Change today: {change_pct}%
+RSI(14): {rsi}
+MA20: {ma20}
+MA50: {ma50}
+Day high: {day_high}
+Day low: {day_low}
+ATR: {atr}
+Volume ratio vs average: {volume_ratio}x
+Intraday support: {support}
+Intraday resistance: {resistance}
+
+NEWS AND MACRO CONTEXT:
+{news}
+
+TECHNICAL INTERPRETATION RULES:
+- RSI > 70 = overbought, RSI < 30 = oversold
+- Price above MA20 and MA50 = uptrend
+- Price below MA20 and MA50 = downtrend
+- Volume ratio > 1.5 = strong move, < 0.5 = weak/ignore
+- ATR helps set realistic stop distances
 
 STOP LOSS RULES:
-- Place stop below nearest intraday support level
-- Maximum 2% below entry for stocks and ETFs
+- Place stop below intraday support level
+- Maximum 2% below entry for stocks/ETFs/forex
 - Maximum 3% below entry for crypto
-- For volatile news-driven moves: use 1.5x the candle range as stop
-- Stop must be a specific price level not a percentage
+- Use ATR to validate stop distance is realistic
+- Stop must be a specific price level
 
 TAKE PROFIT RULES:
-- TP1: first intraday resistance level (partial exit 50%)
-- TP2: second resistance or measured move target (exit 30%)
-- TP3: extended target only if momentum is very strong (exit 20%)
+- TP1: first intraday resistance (exit 50%)
+- TP2: second resistance or measured move (exit 30%)
+- TP3: extended target if momentum strong (exit 20%)
 - All TPs must be reachable within 2 days
 
 Return exactly this structure:
@@ -35,7 +53,7 @@ Return exactly this structure:
   "confidence_score": 0-100,
   "timeframe": "intraday or overnight or 2-day swing",
   "entry_zone": [low, high],
-  "entry_trigger": "what must happen to confirm entry",
+  "entry_trigger": "specific price action to confirm entry",
   "stop_loss": price,
   "stop_loss_reason": "exact support level or technical reason",
   "stop_loss_pct": percentage below entry,
@@ -49,10 +67,13 @@ Return exactly this structure:
   "atr_estimate": price,
   "key_support_levels": [price1, price2],
   "key_resistance_levels": [price1, price2],
-  "analysis_summary": "2-3 sentence thesis focused on short-term catalyst",
+  "rsi_signal": "overbought or oversold or neutral",
+  "volume_signal": "high or normal or low",
+  "ma_signal": "above both MAs or below both MAs or mixed",
+  "analysis_summary": "2-3 sentence thesis for day/swing trade",
   "recommended_action": "buy or sell or watch or avoid",
   "time_horizon": "intraday or 1-day or 2-day max",
-  "invalidation": "what price action would invalidate this setup",
+  "invalidation": "specific price that invalidates this setup",
   "news_catalyst": "relevant news driving this move or none",
   "warnings": []
 }}
@@ -79,14 +100,17 @@ Thesis: {summary}
 Invalidation: {invalidation}
 News catalyst: {news_catalyst}
 Current Price: {price}
+RSI: {rsi}
+Volume ratio: {volume_ratio}x
 Recent News: {news}
 
 Ask yourself:
 1. Is the stop loss too tight or too wide for a day/swing trade?
 2. Are the take profit levels realistic within 2 days?
 3. Is the risk/reward at least 1.5:1?
-4. Is there a clear catalyst or technical reason for the move?
-5. Is the entry trigger specific enough?
+4. Does RSI confirm the direction?
+5. Is volume confirming the move?
+6. Is there a clear catalyst?
 
 Return ONLY valid JSON:
 {{
@@ -98,8 +122,10 @@ Return ONLY valid JSON:
   "tp1_realistic": true or false,
   "tp2_realistic": true or false,
   "risk_reward_valid": true or false,
+  "rsi_confirms": true or false,
+  "volume_confirms": true or false,
   "concerns": ["list any concerns"],
-  "best_entry_time": "e.g. market open, after news, pullback to support",
+  "best_entry_time": "specific time or condition e.g. market open, pullback to support",
   "review_summary": "1-2 sentence final verdict for a day/swing trader"
 }}
 """
