@@ -9,8 +9,8 @@ from services.signal_history import history
 from claude.client import analyse, review_signal
 from claude.prompts.analysis import ANALYSIS_PROMPT, REVIEW_PROMPT
 
-CONFIDENCE_THRESHOLD = 70
-REVIEW_THRESHOLD = 72
+CONFIDENCE_THRESHOLD = 55
+REVIEW_THRESHOLD = 60
 CHECK_INTERVAL = 900
 
 import datetime
@@ -32,11 +32,11 @@ async def has_momentum(pd: dict) -> bool:
     change_pct = abs(pd.get("change_pct", 0))
     volume_ratio = pd.get("volume_ratio", 1)
     rsi = pd.get("rsi", 50)
-    if change_pct > 1.0:
+    if change_pct > 0.3:
         return True
-    if change_pct > 0.5 and volume_ratio > 1.3:
+    if rsi > 65 or rsi < 35:
         return True
-    if rsi > 72 or rsi < 28:
+    if volume_ratio > 1.2:
         return True
     return False
 
