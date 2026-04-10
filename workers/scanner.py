@@ -13,8 +13,8 @@ from config.settings import settings
 
 GOLD_EPIC = "GOLD"
 SCAN_INTERVAL = 120
-CONFIDENCE_THRESHOLD = 55
-REVIEW_THRESHOLD = 58
+CONFIDENCE_THRESHOLD = 65
+REVIEW_THRESHOLD = 65
 MAX_CANDLES = 100
 
 def is_trading_session() -> bool:
@@ -253,12 +253,18 @@ async def scan_gold(market_context: dict) -> dict | None:
     if "error" in review:
         return None
     if not review.get("approved", False):
-        print(f"Gold: rejected by reviewer — {review.get('concerns', [])}")
+       concerns = review.get("concerns", [])
+    if len(concerns) <= 2:
+        print(f"Gold: minor concerns — proceeding anyway")
+        review["approved"] = True
+    else:
+        print(f"Gold: rejected by reviewer — {concerns}")
         return None
-    final_confidence = review.get("final_confidence", confidence)
-    if final_confidence < REVIEW_THRESHOLD:
-        print(f"Gold: final confidence {final_confidence} too low — skipped")
-        return None
+
+final_confidence = review.get("final_confidence", confidence)
+if final_confidence < REVIEW_THRESHOLD:
+    print(f"Gold: final confidence {final_confidence} too low — skipped")
+    return None
     sl = review.get("stop_loss_adjustment") or result.get("stop_loss", 0)
     sl_reason = (review.get("stop_loss_adjustment_reason")
                  or result.get("stop_loss_reason", "n/a"))
