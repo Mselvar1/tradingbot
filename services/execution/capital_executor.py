@@ -5,7 +5,7 @@ from datetime import datetime
 
 MAX_RISK_PER_TRADE_PCT = 0.02
 MAX_OPEN_TRADES = 3
-MIN_RR = 2.5
+MIN_RR = 1.5
 
 class CapitalExecutor:
     def __init__(self):
