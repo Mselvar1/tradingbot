@@ -230,9 +230,12 @@ async def scan_gold(market_context: dict):
     action = result.get("recommended_action", "watch")
     trading_verdict = result.get("trading_verdict", "WAIT")
     print(f"Gold: {confidence}/100 {trading_verdict}")
-    if confidence < CONFIDENCE_THRESHOLD or action not in ["buy", "sell"]:
+    if confidence < CONFIDENCE_THRESHOLD:
         print("Gold: below threshold — skipped")
         return None
+if action not in ["buy", "sell"]:
+    action = "buy" if result.get("trend_direction") == "bullish" else "sell"
+    print(f"Gold: forced action to {action} based on trend")
     review_prompt = REVIEW_PROMPT.format(
         ticker="GOLD",
         action=action,
