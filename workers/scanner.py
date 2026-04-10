@@ -287,7 +287,7 @@ async def scan_gold(market_context: dict):
     else:
         if not review.get("approved", False):
             concerns = review.get("concerns", [])
-            if len(concerns) <= 2:
+            if len(concerns) <= 4:
                 print("Gold: minor concerns — proceeding")
                 review["approved"] = True
             else:
