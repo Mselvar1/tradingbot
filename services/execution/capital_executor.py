@@ -61,6 +61,19 @@ class CapitalExecutor:
         if not capital_client.session_token:
             await capital_client.create_session()
         direction = "BUY" if action == "buy" else "SELL"
+        
+        current_price = entry_price
+        min_stop_distance = current_price * 0.003
+        
+        if action == "buy":
+            if current_price - stop_loss < min_stop_distance:
+                stop_loss = round(current_price - min_stop_distance, 2)
+                print(f"Stop loss adjusted to minimum distance: {stop_loss}")
+        else:
+            if stop_loss - current_price < min_stop_distance:
+                stop_loss = round(current_price + min_stop_distance, 2)
+                print(f"Stop loss adjusted to minimum distance: {stop_loss}")
+
         result = await capital_client.place_order(
             epic=epic,
             direction=direction,
