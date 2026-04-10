@@ -11,11 +11,22 @@ class Settings(BaseSettings):
     paper_mode: bool = True
     allowed_telegram_ids: str = ""
     public_channel_id: str = ""
+    capital_api_key_demo: Optional[str] = None
+    capital_api_key_live: Optional[str] = None
+    capital_mode: str = "demo"
+    capital_email: Optional[str] = None
+    capital_password: Optional[str] = None
 
     @property
     def allowed_ids(self):
         return [int(x.strip()) for x in
                 self.allowed_telegram_ids.split(",") if x.strip()]
+
+    @property
+    def capital_api_key(self):
+        if self.capital_mode == "live":
+            return self.capital_api_key_live
+        return self.capital_api_key_demo
 
     class Config:
         env_file = ".env"
