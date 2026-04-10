@@ -99,7 +99,7 @@ async def cmd_analyze(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Trade smart. Manage risk always.\n"
         f"───────────────────"
     )
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await update.message.reply_text(msg)
 
 async def cmd_news(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await auth_check(update): return
