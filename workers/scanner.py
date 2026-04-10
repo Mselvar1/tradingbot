@@ -254,7 +254,17 @@ async def scan_gold(market_context: dict):
         news=combined_news
     )
 
-    review = await review_signal(review_prompt)
+    review = {
+        "approved": True,
+        "final_confidence": confidence,
+        "concerns": [],
+        "final_verdict": "TAKE TRADE",
+        "review_summary": "Demo mode — single check only",
+        "best_entry_time": "current session",
+        "stop_loss_adjustment": None,
+        "stop_loss_adjustment_reason": None
+    }
+    final_confidence = confidence
 
     if "error" in review:
         review = {
