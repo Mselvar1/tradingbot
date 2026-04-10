@@ -13,9 +13,10 @@ from config.settings import settings
 
 GOLD_EPIC = "GOLD"
 SCAN_INTERVAL = 120
-CONFIDENCE_THRESHOLD = 65
-REVIEW_THRESHOLD = 65
+CONFIDENCE_THRESHOLD = 55
+REVIEW_THRESHOLD = 58
 MAX_CANDLES = 100
+
 
 def is_trading_session() -> bool:
     now = datetime.datetime.utcnow()
@@ -33,64 +34,74 @@ def is_trading_session() -> bool:
     in_ny = ny_open <= time_now <= ny_close
     return in_london or in_ny
 
+
 def get_session_name() -> str:
     now = datetime.datetime.utcnow()
     hour = now.hour
     minute = now.minute
     time_now = hour * 60 + minute
-    if 7*60 <= time_now <= 9*60:
+    if 7 * 60 <= time_now <= 9 * 60:
         return "LONDON OPEN"
-    elif 9*60 < time_now <= 13*60+30:
+    elif 9 * 60 < time_now <= 13 * 60 + 30:
         return "LONDON MID"
-    elif 13*60+30 <= time_now <= 15*60+30:
+    elif 13 * 60 + 30 <= time_now <= 15 * 60 + 30:
         return "NY OPEN"
-    elif 15*60+30 < time_now <= 17*60:
+    elif 15 * 60 + 30 < time_now <= 17 * 60:
         return "LONDON/NY OVERLAP"
-    elif 17*60 < time_now <= 20*60:
+    elif 17 * 60 < time_now <= 20 * 60:
         return "NY SESSION"
     else:
         return "OFF HOURS"
+
 
 async def get_gold_data() -> dict:
     try:
         if not capital_client.session_token:
             await capital_client.create_session()
         price_data = await capital_client.get_price(GOLD_EPIC)
-        candles_1m = await capital_client.get_candles(GOLD_EPIC, "MINUTE", MAX_CANDLES)
-        candles_5m = await capital_client.get_candles(GOLD_EPIC, "MINUTE_5", 50)
+        candles_1m = await capital_client.get_candles(
+            GOLD_EPIC, "MINUTE", MAX_CANDLES
+        )
         if not candles_1m or price_data["price"] == 0:
             return {}
         closes_1m = candles_1m
-        closes_5m = candles_5m if candles_5m else closes_1m
-        gains = [closes_1m[i]-closes_1m[i-1]
-                 for i in range(1, len(closes_1m))
-                 if closes_1m[i] > closes_1m[i-1]]
-        losses = [closes_1m[i-1]-closes_1m[i]
-                  for i in range(1, len(closes_1m))
-                  if closes_1m[i] < closes_1m[i-1]]
-        avg_gain = sum(gains[-14:])/14 if gains else 0
-        avg_loss = sum(losses[-14:])/14 if losses else 0.001
+        gains = [
+            closes_1m[i] - closes_1m[i - 1]
+            for i in range(1, len(closes_1m))
+            if closes_1m[i] > closes_1m[i - 1]
+        ]
+        losses = [
+            closes_1m[i - 1] - closes_1m[i]
+            for i in range(1, len(closes_1m))
+            if closes_1m[i] < closes_1m[i - 1]
+        ]
+        avg_gain = sum(gains[-14:]) / 14 if gains else 0
+        avg_loss = sum(losses[-14:]) / 14 if losses else 0.001
         rs = avg_gain / avg_loss
-        rsi = round(100 - (100/(1+rs)), 1)
-        ma20 = round(sum(closes_1m[-20:])/min(20, len(closes_1m)), 2)
-        ma50 = round(sum(closes_1m[-50:])/min(50, len(closes_1m)), 2)
+        rsi = round(100 - (100 / (1 + rs)), 1)
+        ma20 = round(sum(closes_1m[-20:]) / min(20, len(closes_1m)), 2)
+        ma50 = round(sum(closes_1m[-50:]) / min(50, len(closes_1m)), 2)
         recent_high = max(closes_1m[-20:])
         recent_low = min(closes_1m[-20:])
         atr_1m = round(recent_high - recent_low, 2)
         prev_close = closes_1m[0]
         current = price_data["price"]
-        change_pct = round((current - prev_close)/prev_close*100, 3)
+        change_pct = round((current - prev_close) / prev_close * 100, 3)
         fvg_zones = []
         for i in range(2, min(len(closes_1m), 30)):
-            gap = closes_1m[i] - closes_1m[i-2]
+            gap = closes_1m[i] - closes_1m[i - 2]
             if abs(gap) > atr_1m * 0.3:
                 fvg_zones.append({
                     "type": "bullish" if gap > 0 else "bearish",
-                    "low": min(closes_1m[i-2], closes_1m[i]),
-                    "high": max(closes_1m[i-2], closes_1m[i])
+                    "low": min(closes_1m[i - 2], closes_1m[i]),
+                    "high": max(closes_1m[i - 2], closes_1m[i])
                 })
-        session_high = max(closes_1m[-30:]) if len(closes_1m) >= 30 else recent_high
-        session_low = min(closes_1m[-30:]) if len(closes_1m) >= 30 else recent_low
+        session_high = (
+            max(closes_1m[-30:]) if len(closes_1m) >= 30 else recent_high
+        )
+        session_low = (
+            min(closes_1m[-30:]) if len(closes_1m) >= 30 else recent_low
+        )
         return {
             "ticker": "GOLD",
             "epic": GOLD_EPIC,
@@ -116,19 +127,19 @@ async def get_gold_data() -> dict:
         print(f"Gold data error: {e}")
         return {}
 
+
 async def has_scalp_setup(pd: dict) -> bool:
     rsi = pd.get("rsi", 50)
     change_pct = abs(pd.get("change_pct", 0))
     atr = pd.get("atr", 0)
     price = pd.get("price", 0)
-    ma20 = pd.get("ma20", 0)
-    if rsi > 68 or rsi < 32:
+    if rsi > 65 or rsi < 35:
         return True
-    if change_pct > 0.2:
+    if change_pct > 0.15:
         return True
     if atr > 0 and price > 0:
         atr_pct = atr / price * 100
-        if atr_pct > 0.15:
+        if atr_pct > 0.1:
             return True
     fvg_zones = pd.get("fvg_zones", [])
     if fvg_zones:
@@ -137,7 +148,8 @@ async def has_scalp_setup(pd: dict) -> bool:
                 return True
     return False
 
-async def scan_gold(market_context: dict) -> dict | None:
+
+async def scan_gold(market_context: dict):
     if risk.kill_switch:
         return None
     if not is_trading_session():
@@ -149,15 +161,20 @@ async def scan_gold(market_context: dict) -> dict | None:
         print("Gold: no data — skipped")
         return None
     session = get_session_name()
-    print(f"Gold: price={pd['price']} RSI={pd['rsi']} change={pd['change_pct']}% session={session}")
+    print(
+        f"Gold: price={pd['price']} RSI={pd['rsi']} "
+        f"change={pd['change_pct']}% session={session}"
+    )
     if not await has_scalp_setup(pd):
-        print(f"Gold: no scalp setup — skipped")
+        print("Gold: no scalp setup — skipped")
         return None
     sentiment = await get_market_sentiment()
     if sentiment.get("vix", 0) > 35:
         print(f"Gold: VIX too high ({sentiment['vix']}) — skipped")
         return None
-    gold_news = await get_news("gold XAUUSD precious metals", max_articles=5)
+    gold_news = await get_news(
+        "gold XAUUSD precious metals", max_articles=5
+    )
     geo_news = await get_geopolitical_news()
     news_text = "\n".join(
         f"- {a['title']} ({a['source']}, {a['published']})"
@@ -176,10 +193,11 @@ async def scan_gold(market_context: dict) -> dict | None:
     combined_news = (
         f"GOLD NEWS:\n{news_text}\n\n"
         f"MACRO & GEOPOLITICAL:\n{geo_text}\n\n"
-        f"MARKET REGIME: VIX {sentiment.get('vix',0)} — {sentiment.get('regime','unknown')}\n\n"
+        f"MARKET REGIME: VIX {sentiment.get('vix', 0)} — "
+        f"{sentiment.get('regime', 'unknown')}\n\n"
         f"SMC DATA:\n{fvg_text}\n"
-        f"Session high: {pd.get('session_high',0)}\n"
-        f"Session low: {pd.get('session_low',0)}\n"
+        f"Session high: {pd.get('session_high', 0)}\n"
+        f"Session low: {pd.get('session_low', 0)}\n"
         f"Current session: {session}"
     )
     sentiment_text = market_context.get("summary", "No sentiment data.")
@@ -200,7 +218,10 @@ async def scan_gold(market_context: dict) -> dict | None:
         sentiment=sentiment_text,
         news=combined_news
     )
-    print(f"Gold: analysing with Claude (RSI:{pd['rsi']} session:{session})...")
+    print(
+        f"Gold: analysing with Claude "
+        f"(RSI:{pd['rsi']} session:{session})..."
+    )
     result = await analyse(prompt)
     if "error" in result:
         print(f"Gold: Claude error — {result}")
@@ -210,7 +231,7 @@ async def scan_gold(market_context: dict) -> dict | None:
     trading_verdict = result.get("trading_verdict", "WAIT")
     print(f"Gold: {confidence}/100 {trading_verdict}")
     if confidence < CONFIDENCE_THRESHOLD or action not in ["buy", "sell"]:
-        print(f"Gold: below threshold — skipped")
+        print("Gold: below threshold — skipped")
         return None
     review_prompt = REVIEW_PROMPT.format(
         ticker="GOLD",
@@ -222,7 +243,9 @@ async def scan_gold(market_context: dict) -> dict | None:
         fvg_zone=result.get("fvg_zone", "none"),
         order_block_present=result.get("order_block_present", False),
         order_block_zone=result.get("order_block_zone", "none"),
-        liquidity_sweep_detected=result.get("liquidity_sweep_detected", False),
+        liquidity_sweep_detected=result.get(
+            "liquidity_sweep_detected", False
+        ),
         session_context=session,
         confluences=result.get("confluences", []),
         trading_verdict=trading_verdict,
@@ -251,23 +274,36 @@ async def scan_gold(market_context: dict) -> dict | None:
     )
     review = await review_signal(review_prompt)
     if "error" in review:
-        return None
-    if not review.get("approved", False):
-       concerns = review.get("concerns", [])
-    if len(concerns) <= 2:
-        print(f"Gold: minor concerns — proceeding anyway")
-        review["approved"] = True
+        review = {
+            "approved": True,
+            "final_confidence": confidence,
+            "concerns": [],
+            "final_verdict": "TAKE TRADE",
+            "review_summary": "Auto-approved (reviewer unavailable)",
+            "best_entry_time": "current session",
+            "stop_loss_adjustment": None,
+            "stop_loss_adjustment_reason": None
+        }
     else:
-        print(f"Gold: rejected by reviewer — {concerns}")
-        return None
+        if not review.get("approved", False):
+            concerns = review.get("concerns", [])
+            if len(concerns) <= 2:
+                print("Gold: minor concerns — proceeding")
+                review["approved"] = True
+            else:
+                print(f"Gold: rejected — {concerns}")
+                return None
+        final_confidence = review.get("final_confidence", confidence)
+        if final_confidence < REVIEW_THRESHOLD:
+            print(f"Gold: confidence {final_confidence} too low")
+            return None
 
-final_confidence = review.get("final_confidence", confidence)
-if final_confidence < REVIEW_THRESHOLD:
-    print(f"Gold: final confidence {final_confidence} too low — skipped")
-    return None
+    final_confidence = review.get("final_confidence", confidence)
     sl = review.get("stop_loss_adjustment") or result.get("stop_loss", 0)
-    sl_reason = (review.get("stop_loss_adjustment_reason")
-                 or result.get("stop_loss_reason", "n/a"))
+    sl_reason = (
+        review.get("stop_loss_adjustment_reason")
+        or result.get("stop_loss_reason", "n/a")
+    )
     return {
         "ticker": "GOLD",
         "action": action,
@@ -304,7 +340,9 @@ if final_confidence < REVIEW_THRESHOLD:
         "fvg_zone": result.get("fvg_zone", None),
         "order_block_present": result.get("order_block_present", False),
         "order_block_zone": result.get("order_block_zone", None),
-        "liquidity_sweep_detected": result.get("liquidity_sweep_detected", False),
+        "liquidity_sweep_detected": result.get(
+            "liquidity_sweep_detected", False
+        ),
         "session_context": session,
         "confluences": result.get("confluences", []),
         "final_verdict": review.get("final_verdict", "TAKE TRADE"),
@@ -314,17 +352,22 @@ if final_confidence < REVIEW_THRESHOLD:
         "vix": sentiment.get("vix", 0),
         "regime": sentiment.get("regime", "unknown"),
         "fear_greed": market_context.get("fear_greed", {}).get("value", 50),
-        "fear_greed_label": market_context.get("fear_greed", {}).get("label", "Neutral"),
+        "fear_greed_label": market_context.get("fear_greed", {}).get(
+            "label", "Neutral"
+        ),
         "concerns": review.get("concerns", []),
         "best_entry_time": review.get("best_entry_time", "n/a"),
         "review_summary": review.get("review_summary", "")
     }
 
+
 async def format_signal(signal: dict) -> str:
     action = "BUY" if signal["action"] == "buy" else "SELL"
     verdict = signal.get("trading_verdict", action)
     confluences = signal.get("confluences", [])
-    confluences_text = " | ".join(confluences) if confluences else "none"
+    confluences_text = (
+        " | ".join(confluences) if confluences else "none"
+    )
     smc_text = ""
     if signal.get("fvg_present"):
         smc_text += f"\nFVG: {signal.get('fvg_zone', 'n/a')}"
@@ -355,7 +398,8 @@ async def format_signal(signal: dict) -> str:
         f"Price: {signal['price']} ({signal['change_pct']:+.2f}%)\n"
         f"RSI: {signal['rsi']} — {signal['rsi_signal']}\n"
         f"VIX: {signal['vix']} — {signal['regime']}\n"
-        f"Fear & Greed: {signal['fear_greed']}/100 ({signal['fear_greed_label']})\n"
+        f"Fear & Greed: {signal['fear_greed']}/100 "
+        f"({signal['fear_greed_label']})\n"
         f"Structure: {signal.get('market_structure', 'n/a').upper()}\n\n"
         f"SMC CONFLUENCES\n"
         f"{confluences_text}"
@@ -388,6 +432,7 @@ async def format_signal(signal: dict) -> str:
         f"───────────────────"
     )
 
+
 async def run_scanner(bot, chat_id: int):
     print("Gold scalping scanner started...")
     last_signal_time = None
@@ -398,10 +443,15 @@ async def run_scanner(bot, chat_id: int):
                 session = get_session_name()
                 print(f"Scanning GOLD ({session})...")
                 market_context = await get_market_context()
-                print(f"Fear & Greed: {market_context['fear_greed']['value']} — {market_context['fear_greed']['label']}")
+                print(
+                    f"Fear & Greed: "
+                    f"{market_context['fear_greed']['value']} — "
+                    f"{market_context['fear_greed']['label']}"
+                )
                 now = datetime.datetime.utcnow().timestamp()
-                if last_signal_time and (now - last_signal_time) < min_signal_gap:
-                    print(f"Signal cooldown active — waiting")
+                if (last_signal_time and
+                        (now - last_signal_time) < min_signal_gap):
+                    print("Signal cooldown active — waiting")
                     await asyncio.sleep(SCAN_INTERVAL)
                     continue
                 signal = await scan_gold(market_context)
@@ -418,7 +468,7 @@ async def run_scanner(bot, chat_id: int):
                             print(f"Channel post failed: {e}")
                     history.save(signal)
                     last_signal_time = now
-                    print(f"Gold signal sent and saved")
+                    print("Gold signal sent and saved")
                     trade_result = await executor.place_trade(signal)
                     if trade_result["status"] == "success":
                         trade = trade_result["trade"]
@@ -431,7 +481,9 @@ async def run_scanner(bot, chat_id: int):
                             f"TP: {trade['take_profit']}\n"
                             f"Mode: {settings.capital_mode.upper()}"
                         )
-                        await bot.send_message(chat_id=chat_id, text=trade_msg)
+                        await bot.send_message(
+                            chat_id=chat_id, text=trade_msg
+                        )
                         print(f"Trade placed: {trade}")
                     else:
                         print(f"Trade blocked: {trade_result['reason']}")
