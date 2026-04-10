@@ -1,281 +1,359 @@
 import asyncio
-from services.watchlist import watchlist
-from services.data.prices import get_price, get_intraday
-from services.data.news import get_news
-from services.data.macro import get_geopolitical_news, get_market_sentiment, get_sector_news
+import datetime
+from services.data.capital import capital_client
+from services.data.macro import get_geopolitical_news, get_market_sentiment
 from services.data.sentiment import get_market_context
+from services.data.news import get_news
 from services.risk import risk
 from services.signal_history import history
+from services.execution.capital_executor import executor
 from claude.client import analyse, review_signal
 from claude.prompts.analysis import ANALYSIS_PROMPT, REVIEW_PROMPT
+from config.settings import settings
 
+GOLD_EPIC = "GOLD"
+SCAN_INTERVAL = 120
 CONFIDENCE_THRESHOLD = 55
-REVIEW_THRESHOLD = 60
-CHECK_INTERVAL = 900
+REVIEW_THRESHOLD = 58
+MAX_CANDLES = 100
 
-import datetime
-
-def is_market_hours(ticker: str) -> bool:
+def is_trading_session() -> bool:
     now = datetime.datetime.utcnow()
     weekday = now.weekday()
     hour = now.hour
     minute = now.minute
-    if ticker in ["BTC-USD", "ETH-USD"]:
-        return True
     if weekday >= 5:
         return False
-    market_open = hour > 13 or (hour == 13 and minute >= 30)
-    market_close = hour < 20
-    return market_open and market_close
+    time_now = hour * 60 + minute
+    london_open = 7 * 60
+    london_close = 16 * 60
+    ny_open = 13 * 60 + 30
+    ny_close = 20 * 60
+    in_london = london_open <= time_now <= london_close
+    in_ny = ny_open <= time_now <= ny_close
+    return in_london or in_ny
 
-async def has_momentum(pd: dict) -> bool:
-    change_pct = abs(pd.get("change_pct", 0))
-    volume_ratio = pd.get("volume_ratio", 1)
+def get_session_name() -> str:
+    now = datetime.datetime.utcnow()
+    hour = now.hour
+    minute = now.minute
+    time_now = hour * 60 + minute
+    if 7*60 <= time_now <= 9*60:
+        return "LONDON OPEN"
+    elif 9*60 < time_now <= 13*60+30:
+        return "LONDON MID"
+    elif 13*60+30 <= time_now <= 15*60+30:
+        return "NY OPEN"
+    elif 15*60+30 < time_now <= 17*60:
+        return "LONDON/NY OVERLAP"
+    elif 17*60 < time_now <= 20*60:
+        return "NY SESSION"
+    else:
+        return "OFF HOURS"
+
+async def get_gold_data() -> dict:
+    try:
+        if not capital_client.session_token:
+            await capital_client.create_session()
+        price_data = await capital_client.get_price(GOLD_EPIC)
+        candles_1m = await capital_client.get_candles(GOLD_EPIC, "MINUTE", MAX_CANDLES)
+        candles_5m = await capital_client.get_candles(GOLD_EPIC, "MINUTE_5", 50)
+        if not candles_1m or price_data["price"] == 0:
+            return {}
+        closes_1m = candles_1m
+        closes_5m = candles_5m if candles_5m else closes_1m
+        gains = [closes_1m[i]-closes_1m[i-1]
+                 for i in range(1, len(closes_1m))
+                 if closes_1m[i] > closes_1m[i-1]]
+        losses = [closes_1m[i-1]-closes_1m[i]
+                  for i in range(1, len(closes_1m))
+                  if closes_1m[i] < closes_1m[i-1]]
+        avg_gain = sum(gains[-14:])/14 if gains else 0
+        avg_loss = sum(losses[-14:])/14 if losses else 0.001
+        rs = avg_gain / avg_loss
+        rsi = round(100 - (100/(1+rs)), 1)
+        ma20 = round(sum(closes_1m[-20:])/min(20, len(closes_1m)), 2)
+        ma50 = round(sum(closes_1m[-50:])/min(50, len(closes_1m)), 2)
+        recent_high = max(closes_1m[-20:])
+        recent_low = min(closes_1m[-20:])
+        atr_1m = round(recent_high - recent_low, 2)
+        prev_close = closes_1m[0]
+        current = price_data["price"]
+        change_pct = round((current - prev_close)/prev_close*100, 3)
+        fvg_zones = []
+        for i in range(2, min(len(closes_1m), 30)):
+            gap = closes_1m[i] - closes_1m[i-2]
+            if abs(gap) > atr_1m * 0.3:
+                fvg_zones.append({
+                    "type": "bullish" if gap > 0 else "bearish",
+                    "low": min(closes_1m[i-2], closes_1m[i]),
+                    "high": max(closes_1m[i-2], closes_1m[i])
+                })
+        session_high = max(closes_1m[-30:]) if len(closes_1m) >= 30 else recent_high
+        session_low = min(closes_1m[-30:]) if len(closes_1m) >= 30 else recent_low
+        return {
+            "ticker": "GOLD",
+            "epic": GOLD_EPIC,
+            "price": current,
+            "prev_close": prev_close,
+            "change_pct": change_pct,
+            "rsi": rsi,
+            "ma20": ma20,
+            "ma50": ma50,
+            "day_high": price_data.get("high", recent_high),
+            "day_low": price_data.get("low", recent_low),
+            "atr": atr_1m,
+            "volume_ratio": 1.0,
+            "support": recent_low,
+            "resistance": recent_high,
+            "session_high": session_high,
+            "session_low": session_low,
+            "fvg_zones": fvg_zones[:3],
+            "candles_1m": len(closes_1m),
+            "source": "capital.com"
+        }
+    except Exception as e:
+        print(f"Gold data error: {e}")
+        return {}
+
+async def has_scalp_setup(pd: dict) -> bool:
     rsi = pd.get("rsi", 50)
-    if change_pct > 0.3:
+    change_pct = abs(pd.get("change_pct", 0))
+    atr = pd.get("atr", 0)
+    price = pd.get("price", 0)
+    ma20 = pd.get("ma20", 0)
+    if rsi > 68 or rsi < 32:
         return True
-    if rsi > 65 or rsi < 35:
+    if change_pct > 0.2:
         return True
-    if volume_ratio > 1.2:
-        return True
+    if atr > 0 and price > 0:
+        atr_pct = atr / price * 100
+        if atr_pct > 0.15:
+            return True
+    fvg_zones = pd.get("fvg_zones", [])
+    if fvg_zones:
+        for fvg in fvg_zones:
+            if fvg["low"] <= price <= fvg["high"]:
+                return True
     return False
 
-async def deep_scan_ticker(ticker: str, market_context: dict) -> dict | None:
+async def scan_gold(market_context: dict) -> dict | None:
     if risk.kill_switch:
         return None
-    if not is_market_hours(ticker):
-        print(f"{ticker}: market closed — skipped")
+    if not is_trading_session():
+        session = get_session_name()
+        print(f"Gold: outside trading hours ({session}) — skipped")
         return None
-    try:
-        pd = await get_intraday(ticker)
-        if pd.get("price", 0) == 0:
-            return None
-
-        if not await has_momentum(pd):
-            print(f"{ticker}: no momentum (change:{pd.get('change_pct',0)}% RSI:{pd.get('rsi',50)}) — skipped")
-            return None
-
-        sentiment = await get_market_sentiment()
-        if sentiment["risk_off"]:
-            print(f"Risk-off (VIX {sentiment['vix']}), skipping {ticker}")
-            return None
-
-        ticker_news = await get_sector_news(ticker)
-        geo_news = await get_geopolitical_news()
-
-        ticker_news_text = "\n".join(
-            f"- {a['title']} ({a['source']}, {a['published']})"
-            for a in ticker_news
-        ) or "No recent news."
-
-        geo_text = "\n".join(
-            f"- [{a['category'].upper()}] {a['title']} ({a['source']})"
-            for a in geo_news[:8]
-        ) or "No geopolitical news."
-
-        combined_news = (
-            f"ASSET NEWS:\n{ticker_news_text}\n\n"
-            f"MACRO & GEOPOLITICAL:\n{geo_text}\n\n"
-            f"MARKET REGIME: VIX {sentiment['vix']} — {sentiment['regime']}"
-        )
-
-        sentiment_text = market_context.get("summary", "No sentiment data.")
-
-        prompt = ANALYSIS_PROMPT.format(
-            ticker=ticker,
-            price=pd.get("price", 0),
-            prev_close=pd.get("prev_close", 0),
-            change_pct=pd.get("change_pct", 0),
-            rsi=pd.get("rsi", 50),
-            ma20=pd.get("ma20", 0),
-            ma50=pd.get("ma50", 0),
-            day_high=pd.get("day_high", 0),
-            day_low=pd.get("day_low", 0),
-            atr=pd.get("atr", 0),
-            volume_ratio=pd.get("volume_ratio", 1),
-            support=pd.get("support", 0),
-            resistance=pd.get("resistance", 0),
-            sentiment=sentiment_text,
-            news=combined_news
-        )
-
-        print(f"Deep analysing {ticker} (RSI:{pd.get('rsi',50)} change:{pd.get('change_pct',0)}%)...")
-        result = await analyse(prompt)
-
-        if "error" in result:
-            return None
-
-        confidence = result.get("confidence_score", 0)
-        action = result.get("recommended_action", "watch")
-
-        if confidence < CONFIDENCE_THRESHOLD or action not in ["buy", "sell"]:
-            print(f"{ticker}: {confidence}/100 {action} — skipped")
-            return None
-
-        print(f"{ticker}: first check passed ({confidence}/100) — reviewing...")
-
-        review_prompt = REVIEW_PROMPT.format(
-    ticker=ticker,
-    action=action,
-    market_structure=result.get("market_structure", "unknown"),
-    bos_detected=result.get("bos_detected", False),
-    choch_detected=result.get("choch_detected", False),
-    fvg_present=result.get("fvg_present", False),
-    fvg_zone=result.get("fvg_zone", "none"),
-    order_block_present=result.get("order_block_present", False),
-    order_block_zone=result.get("order_block_zone", "none"),
-    liquidity_sweep_detected=result.get("liquidity_sweep_detected", False),
-    session_context=result.get("session_context", "unknown"),
-    confluences=result.get("confluences", []),
-    trading_verdict=result.get("trading_verdict", "WAIT"),
-    entry=result.get("entry_zone", "n/a"),
-    entry_trigger=result.get("entry_trigger", "n/a"),
-    stop_loss=result.get("stop_loss", "n/a"),
-    stop_loss_pct=result.get("stop_loss_pct", "n/a"),
-    stop_loss_reason=result.get("stop_loss_reason", "n/a"),
-    tp1=result.get("take_profit_1", "n/a"),
-    tp1_pct=result.get("take_profit_1_pct", "n/a"),
-    tp2=result.get("take_profit_2", "n/a"),
-    tp2_pct=result.get("take_profit_2_pct", "n/a"),
-    tp3=result.get("take_profit_3", "n/a"),
-    tp3_pct=result.get("take_profit_3_pct", "n/a"),
-    rr=result.get("risk_reward", "n/a"),
-    timeframe=result.get("timeframe", "n/a"),
-    confidence=confidence,
-    summary=result.get("analysis_summary", "n/a"),
-    invalidation=result.get("invalidation", "n/a"),
-    news_catalyst=result.get("news_catalyst", "n/a"),
-    price=pd.get("price", 0),
-    rsi=pd.get("rsi", 50),
-    volume_ratio=pd.get("volume_ratio", 1),
-    sentiment=sentiment_text,
-    news=combined_news
-)
-
-        review = await review_signal(review_prompt)
-
-        if "error" in review:
-            return None
-
-        if not review.get("approved", False):
-            print(f"{ticker}: rejected — {review.get('concerns', [])}")
-            return None
-
-        final_confidence = review.get("final_confidence", confidence)
-        if final_confidence < REVIEW_THRESHOLD:
-            print(f"{ticker}: final confidence {final_confidence}/100 — skipped")
-            return None
-
-        sl = review.get("stop_loss_adjustment") or result.get("stop_loss", "n/a")
-        sl_reason = (review.get("stop_loss_adjustment_reason")
-                     or result.get("stop_loss_reason", "n/a"))
-
-        return {
-            "ticker": ticker,
-            "action": action,
-            "confidence": final_confidence,
-            "timeframe": result.get("timeframe", "n/a"),
-            "price": pd.get("price", 0),
-            "trading_verdict": result.get("trading_verdict", "WAIT"),
-            "verdict_reason": result.get("verdict_reason", ""),
-            "risk_comment": result.get("risk_comment", ""),
-            "market_structure": result.get("market_structure", "unknown"),
-            "bos_detected": result.get("bos_detected", False),
-            "choch_detected": result.get("choch_detected", False),
-            "fvg_present": result.get("fvg_present", False),
-            "fvg_zone": result.get("fvg_zone", None),
-            "order_block_present": result.get("order_block_present", False),
-            "order_block_zone": result.get("order_block_zone", None),
-            "liquidity_sweep_detected": result.get("liquidity_sweep_detected", False),
-            "session_context": result.get("session_context", "unknown"),
-            "confluences": result.get("confluences", []),
-            "final_verdict": review.get("final_verdict", "TAKE TRADE"),
-            "change_pct": pd.get("change_pct", 0),
-            "rsi": pd.get("rsi", 50),
-            "volume_ratio": pd.get("volume_ratio", 1),
-            "entry": result.get("entry_zone", "n/a"),
-            "entry_trigger": result.get("entry_trigger", "n/a"),
-            "stop_loss": sl,
-            "stop_loss_reason": sl_reason,
-            "stop_loss_pct": result.get("stop_loss_pct", "n/a"),
-            "tp1": result.get("take_profit_1", "n/a"),
-            "tp1_pct": result.get("take_profit_1_pct", "n/a"),
-            "tp2": result.get("take_profit_2", "n/a"),
-            "tp2_pct": result.get("take_profit_2_pct", "n/a"),
-            "tp3": result.get("take_profit_3", "n/a"),
-            "tp3_pct": result.get("take_profit_3_pct", "n/a"),
-            "rr": result.get("risk_reward", "n/a"),
-            "rsi_signal": result.get("rsi_signal", "n/a"),
-            "volume_signal": result.get("volume_signal", "n/a"),
-            "ma_signal": result.get("ma_signal", "n/a"),
-            "sentiment_signal": result.get("sentiment_signal", "n/a"),
-            "high_impact_event_risk": result.get("high_impact_event_risk", "no"),
-            "summary": result.get("analysis_summary", ""),
-            "invalidation": result.get("invalidation", ""),
-            "news_catalyst": result.get("news_catalyst", "none"),
-            "vix": sentiment["vix"],
-            "regime": sentiment["regime"],
-            "fear_greed": market_context.get("fear_greed", {}).get("value", 50),
-            "fear_greed_label": market_context.get("fear_greed", {}).get("label", "Neutral"),
-            "concerns": review.get("concerns", []),
-            "best_entry_time": review.get("best_entry_time", "n/a"),
-            "review_summary": review.get("review_summary", "")
-        }
-
-    except Exception as e:
-        print(f"Scanner error for {ticker}: {e}")
+    pd = await get_gold_data()
+    if not pd or pd.get("price", 0) == 0:
+        print("Gold: no data — skipped")
         return None
+    session = get_session_name()
+    print(f"Gold: price={pd['price']} RSI={pd['rsi']} change={pd['change_pct']}% session={session}")
+    if not await has_scalp_setup(pd):
+        print(f"Gold: no scalp setup — skipped")
+        return None
+    sentiment = await get_market_sentiment()
+    if sentiment.get("vix", 0) > 35:
+        print(f"Gold: VIX too high ({sentiment['vix']}) — skipped")
+        return None
+    gold_news = await get_news("gold XAUUSD precious metals", max_articles=5)
+    geo_news = await get_geopolitical_news()
+    news_text = "\n".join(
+        f"- {a['title']} ({a['source']}, {a['published']})"
+        for a in gold_news
+    ) or "No recent gold news."
+    geo_text = "\n".join(
+        f"- [{a['category'].upper()}] {a['title']}"
+        for a in geo_news[:5]
+    ) or "No geopolitical news."
+    fvg_text = ""
+    if pd.get("fvg_zones"):
+        fvg_text = "Detected FVG zones:\n" + "\n".join(
+            f"- {f['type']} FVG: {f['low']:.2f} - {f['high']:.2f}"
+            for f in pd["fvg_zones"]
+        )
+    combined_news = (
+        f"GOLD NEWS:\n{news_text}\n\n"
+        f"MACRO & GEOPOLITICAL:\n{geo_text}\n\n"
+        f"MARKET REGIME: VIX {sentiment.get('vix',0)} — {sentiment.get('regime','unknown')}\n\n"
+        f"SMC DATA:\n{fvg_text}\n"
+        f"Session high: {pd.get('session_high',0)}\n"
+        f"Session low: {pd.get('session_low',0)}\n"
+        f"Current session: {session}"
+    )
+    sentiment_text = market_context.get("summary", "No sentiment data.")
+    prompt = ANALYSIS_PROMPT.format(
+        ticker="GOLD (XAUUSD)",
+        price=pd["price"],
+        prev_close=pd["prev_close"],
+        change_pct=pd["change_pct"],
+        rsi=pd["rsi"],
+        ma20=pd["ma20"],
+        ma50=pd["ma50"],
+        day_high=pd["day_high"],
+        day_low=pd["day_low"],
+        atr=pd["atr"],
+        volume_ratio=pd["volume_ratio"],
+        support=pd["support"],
+        resistance=pd["resistance"],
+        sentiment=sentiment_text,
+        news=combined_news
+    )
+    print(f"Gold: analysing with Claude (RSI:{pd['rsi']} session:{session})...")
+    result = await analyse(prompt)
+    if "error" in result:
+        print(f"Gold: Claude error — {result}")
+        return None
+    confidence = result.get("confidence_score", 0)
+    action = result.get("recommended_action", "watch")
+    trading_verdict = result.get("trading_verdict", "WAIT")
+    print(f"Gold: {confidence}/100 {trading_verdict}")
+    if confidence < CONFIDENCE_THRESHOLD or action not in ["buy", "sell"]:
+        print(f"Gold: below threshold — skipped")
+        return None
+    review_prompt = REVIEW_PROMPT.format(
+        ticker="GOLD",
+        action=action,
+        market_structure=result.get("market_structure", "unknown"),
+        bos_detected=result.get("bos_detected", False),
+        choch_detected=result.get("choch_detected", False),
+        fvg_present=result.get("fvg_present", False),
+        fvg_zone=result.get("fvg_zone", "none"),
+        order_block_present=result.get("order_block_present", False),
+        order_block_zone=result.get("order_block_zone", "none"),
+        liquidity_sweep_detected=result.get("liquidity_sweep_detected", False),
+        session_context=session,
+        confluences=result.get("confluences", []),
+        trading_verdict=trading_verdict,
+        entry=result.get("entry_zone", "n/a"),
+        entry_trigger=result.get("entry_trigger", "n/a"),
+        stop_loss=result.get("stop_loss", "n/a"),
+        stop_loss_pct=result.get("stop_loss_pct", "n/a"),
+        stop_loss_reason=result.get("stop_loss_reason", "n/a"),
+        tp1=result.get("take_profit_1", "n/a"),
+        tp1_pct=result.get("take_profit_1_pct", "n/a"),
+        tp2=result.get("take_profit_2", "n/a"),
+        tp2_pct=result.get("take_profit_2_pct", "n/a"),
+        tp3=result.get("take_profit_3", "n/a"),
+        tp3_pct=result.get("take_profit_3_pct", "n/a"),
+        rr=result.get("risk_reward", "n/a"),
+        timeframe=result.get("timeframe", "n/a"),
+        confidence=confidence,
+        summary=result.get("analysis_summary", "n/a"),
+        invalidation=result.get("invalidation", "n/a"),
+        news_catalyst=result.get("news_catalyst", "n/a"),
+        price=pd["price"],
+        rsi=pd["rsi"],
+        volume_ratio=pd["volume_ratio"],
+        sentiment=sentiment_text,
+        news=combined_news
+    )
+    review = await review_signal(review_prompt)
+    if "error" in review:
+        return None
+    if not review.get("approved", False):
+        print(f"Gold: rejected by reviewer — {review.get('concerns', [])}")
+        return None
+    final_confidence = review.get("final_confidence", confidence)
+    if final_confidence < REVIEW_THRESHOLD:
+        print(f"Gold: final confidence {final_confidence} too low — skipped")
+        return None
+    sl = review.get("stop_loss_adjustment") or result.get("stop_loss", 0)
+    sl_reason = (review.get("stop_loss_adjustment_reason")
+                 or result.get("stop_loss_reason", "n/a"))
+    return {
+        "ticker": "GOLD",
+        "action": action,
+        "confidence": final_confidence,
+        "timeframe": result.get("timeframe", "intraday"),
+        "price": pd["price"],
+        "change_pct": pd["change_pct"],
+        "rsi": pd["rsi"],
+        "volume_ratio": 1.0,
+        "entry": result.get("entry_zone", [pd["price"], pd["price"]]),
+        "entry_trigger": result.get("entry_trigger", "n/a"),
+        "stop_loss": sl,
+        "stop_loss_reason": sl_reason,
+        "stop_loss_pct": result.get("stop_loss_pct", "n/a"),
+        "tp1": result.get("take_profit_1", "n/a"),
+        "tp1_pct": result.get("take_profit_1_pct", "n/a"),
+        "tp2": result.get("take_profit_2", "n/a"),
+        "tp2_pct": result.get("take_profit_2_pct", "n/a"),
+        "tp3": result.get("take_profit_3", "n/a"),
+        "tp3_pct": result.get("take_profit_3_pct", "n/a"),
+        "rr": result.get("risk_reward", "n/a"),
+        "rsi_signal": result.get("rsi_signal", "n/a"),
+        "volume_signal": "normal",
+        "ma_signal": result.get("ma_signal", "n/a"),
+        "sentiment_signal": result.get("sentiment_signal", "n/a"),
+        "high_impact_event_risk": result.get("high_impact_event_risk", "no"),
+        "trading_verdict": result.get("trading_verdict", "WAIT"),
+        "verdict_reason": result.get("verdict_reason", ""),
+        "risk_comment": result.get("risk_comment", ""),
+        "market_structure": result.get("market_structure", "unknown"),
+        "bos_detected": result.get("bos_detected", False),
+        "choch_detected": result.get("choch_detected", False),
+        "fvg_present": result.get("fvg_present", False),
+        "fvg_zone": result.get("fvg_zone", None),
+        "order_block_present": result.get("order_block_present", False),
+        "order_block_zone": result.get("order_block_zone", None),
+        "liquidity_sweep_detected": result.get("liquidity_sweep_detected", False),
+        "session_context": session,
+        "confluences": result.get("confluences", []),
+        "final_verdict": review.get("final_verdict", "TAKE TRADE"),
+        "summary": result.get("analysis_summary", ""),
+        "invalidation": result.get("invalidation", ""),
+        "news_catalyst": result.get("news_catalyst", "none"),
+        "vix": sentiment.get("vix", 0),
+        "regime": sentiment.get("regime", "unknown"),
+        "fear_greed": market_context.get("fear_greed", {}).get("value", 50),
+        "fear_greed_label": market_context.get("fear_greed", {}).get("label", "Neutral"),
+        "concerns": review.get("concerns", []),
+        "best_entry_time": review.get("best_entry_time", "n/a"),
+        "review_summary": review.get("review_summary", "")
+    }
 
 async def format_signal(signal: dict) -> str:
     action = "BUY" if signal["action"] == "buy" else "SELL"
     verdict = signal.get("trading_verdict", action)
-    verdict_reason = signal.get("verdict_reason", "")
-    risk_comment = signal.get("risk_comment", "")
-
     confluences = signal.get("confluences", [])
-    confluences_text = " | ".join(confluences) if confluences else "none detected"
-
+    confluences_text = " | ".join(confluences) if confluences else "none"
     smc_text = ""
     if signal.get("fvg_present"):
-        smc_text += f"FVG zone: {signal.get('fvg_zone', 'n/a')}\n"
+        smc_text += f"\nFVG: {signal.get('fvg_zone', 'n/a')}"
     if signal.get("order_block_present"):
-        smc_text += f"Order block: {signal.get('order_block_zone', 'n/a')}\n"
+        smc_text += f"\nOrder Block: {signal.get('order_block_zone', 'n/a')}"
     if signal.get("liquidity_sweep_detected"):
-        smc_text += "Liquidity sweep detected\n"
+        smc_text += "\nLiquidity sweep detected"
     if signal.get("bos_detected"):
-        smc_text += "Break of Structure confirmed\n"
+        smc_text += "\nBOS confirmed"
     if signal.get("choch_detected"):
-        smc_text += "Change of Character detected\n"
-
+        smc_text += "\nCHoCH detected"
     event_warning = ""
     if signal.get("high_impact_event_risk") == "yes":
-        event_warning = "\nHIGH IMPACT EVENT — reduce size or wait"
-
+        event_warning = "\nHIGH IMPACT EVENT — trade with caution"
     concerns_text = ""
     if signal.get("concerns"):
         concerns_text = "\nConcerns: " + " | ".join(signal["concerns"])
-
-    final_verdict = signal.get("final_verdict", "TAKE TRADE")
-
     return (
         f"───────────────────\n"
-        f"DUTCHALPHA SIGNAL\n"
+        f"DUTCHALPHA GOLD SIGNAL\n"
         f"───────────────────\n"
-        f"{signal['ticker']} — {verdict}\n"
-        f"{verdict_reason}\n\n"
-        f"VERDICT: {final_verdict}\n"
+        f"GOLD {action} — {verdict}\n"
+        f"{signal.get('verdict_reason', '')}\n\n"
+        f"VERDICT: {signal.get('final_verdict', 'TAKE TRADE')}\n"
         f"Confidence: {signal['confidence']}/100\n"
-        f"Timeframe: {signal['timeframe']}\n"
-        f"Session: {signal.get('session_context', 'n/a').upper()}\n\n"
-        f"MARKET CONDITIONS\n"
-        f"Structure: {signal.get('market_structure', 'n/a').upper()}\n"
+        f"Session: {signal.get('session_context', 'n/a')}\n\n"
+        f"MARKET\n"
+        f"Price: {signal['price']} ({signal['change_pct']:+.2f}%)\n"
+        f"RSI: {signal['rsi']} — {signal['rsi_signal']}\n"
         f"VIX: {signal['vix']} — {signal['regime']}\n"
         f"Fear & Greed: {signal['fear_greed']}/100 ({signal['fear_greed_label']})\n"
-        f"RSI: {signal['rsi']} — {signal['rsi_signal']}\n"
-        f"Volume: {signal['volume_ratio']}x — {signal['volume_signal']}\n\n"
+        f"Structure: {signal.get('market_structure', 'n/a').upper()}\n\n"
         f"SMC CONFLUENCES\n"
-        f"{confluences_text}\n"
-        f"{smc_text}\n"
+        f"{confluences_text}"
+        f"{smc_text}\n\n"
         f"ENTRY\n"
         f"Zone: {signal['entry']}\n"
         f"Trigger: {signal['entry_trigger']}\n"
@@ -283,12 +361,12 @@ async def format_signal(signal: dict) -> str:
         f"RISK MANAGEMENT\n"
         f"Stop Loss: {signal['stop_loss']} (-{signal['stop_loss_pct']}%)\n"
         f"Why: {signal['stop_loss_reason']}\n"
-        f"Advice: {risk_comment}\n\n"
+        f"Advice: {signal.get('risk_comment', 'n/a')}\n\n"
         f"TARGETS\n"
         f"TP1: {signal['tp1']} (+{signal['tp1_pct']}%) — close 50%\n"
         f"TP2: {signal['tp2']} (+{signal['tp2_pct']}%) — close 30%\n"
         f"TP3: {signal['tp3']} (+{signal['tp3_pct']}%) — close 20%\n"
-        f"Risk/Reward: {signal['rr']}\n\n"
+        f"R:R: {signal['rr']}\n\n"
         f"ANALYSIS\n"
         f"Catalyst: {signal['news_catalyst']}\n"
         f"{signal['summary']}\n\n"
@@ -297,30 +375,64 @@ async def format_signal(signal: dict) -> str:
         f"REVIEWER: {signal['review_summary']}"
         f"{concerns_text}"
         f"{event_warning}\n\n"
-        f"Use /buy {signal['ticker']} [amount] to act.\n"
         f"───────────────────\n"
-        f"DutchAlpha — AI Trading Signals\n"
+        f"DutchAlpha — AI Gold Scalping\n"
+        f"Demo mode — not real money\n"
         f"Trade smart. Manage risk always.\n"
         f"───────────────────"
     )
 
 async def run_scanner(bot, chat_id: int):
-    print("Scanner started...")
+    print("Gold scalping scanner started...")
+    last_signal_time = None
+    min_signal_gap = 300
     while True:
         try:
-            tickers = watchlist.get()
-            print(f"Scanning {len(tickers)} tickers...")
-            market_context = await get_market_context()
-            print(f"Fear & Greed: {market_context['fear_greed']['value']} — {market_context['fear_greed']['label']}")
-            for ticker in tickers:
-                signal = await deep_scan_ticker(ticker, market_context)
+            if is_trading_session():
+                session = get_session_name()
+                print(f"Scanning GOLD ({session})...")
+                market_context = await get_market_context()
+                print(f"Fear & Greed: {market_context['fear_greed']['value']} — {market_context['fear_greed']['label']}")
+                now = datetime.datetime.utcnow().timestamp()
+                if last_signal_time and (now - last_signal_time) < min_signal_gap:
+                    print(f"Signal cooldown active — waiting")
+                    await asyncio.sleep(SCAN_INTERVAL)
+                    continue
+                signal = await scan_gold(market_context)
                 if signal:
                     msg = await format_signal(signal)
                     await bot.send_message(chat_id=chat_id, text=msg)
+                    if settings.public_channel_id:
+                        try:
+                            await bot.send_message(
+                                chat_id=settings.public_channel_id,
+                                text=msg
+                            )
+                        except Exception as e:
+                            print(f"Channel post failed: {e}")
                     history.save(signal)
-                    print(f"Signal saved: {signal['ticker']} {signal['action']}")
-                await asyncio.sleep(3)
+                    last_signal_time = now
+                    print(f"Gold signal sent and saved")
+                    trade_result = await executor.place_trade(signal)
+                    if trade_result["status"] == "success":
+                        trade = trade_result["trade"]
+                        trade_msg = (
+                            f"TRADE PLACED — DEMO\n"
+                            f"GOLD {signal['action'].upper()}\n"
+                            f"Size: {trade['size']} units\n"
+                            f"Entry: {trade['entry_price']}\n"
+                            f"Stop: {trade['stop_loss']}\n"
+                            f"TP: {trade['take_profit']}\n"
+                            f"Mode: {settings.capital_mode.upper()}"
+                        )
+                        await bot.send_message(chat_id=chat_id, text=trade_msg)
+                        print(f"Trade placed: {trade}")
+                    else:
+                        print(f"Trade blocked: {trade_result['reason']}")
+            else:
+                session = get_session_name()
+                print(f"Outside trading hours ({session}) — sleeping")
+            await asyncio.sleep(SCAN_INTERVAL)
         except Exception as e:
-            print(f"Scanner loop error: {e}")
-        print("Scan complete. Next scan in 15 minutes.")
-        await asyncio.sleep(CHECK_INTERVAL)
+            print(f"Scanner error: {e}")
+            await asyncio.sleep(SCAN_INTERVAL)

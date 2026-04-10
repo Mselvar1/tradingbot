@@ -6,6 +6,7 @@ from bot.handlers.trading import cmd_buy, cmd_sell, cmd_positions, cmd_balance
 from bot.handlers.image import handle_photo
 from bot.handlers.risk import cmd_risk, cmd_kill, cmd_resume, cmd_checkstops
 from bot.handlers.watchlist import cmd_watchlist
+from bot.handlers.history import cmd_signals, cmd_stats, cmd_outcome
 from workers.scanner import run_scanner
 from config.settings import settings
 
@@ -35,6 +36,9 @@ def main():
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("checkstops", cmd_checkstops))
     app.add_handler(CommandHandler("watchlist", cmd_watchlist))
+    app.add_handler(CommandHandler("signals", cmd_signals))
+    app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("outcome", cmd_outcome))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.IMAGE, handle_photo))
     print("Bot starting...")
