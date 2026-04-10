@@ -4,14 +4,21 @@ from config.settings import settings
 BASE_URL_DEMO = "https://demo-api-capital.backend-capital.com/api/v1"
 BASE_URL_LIVE = "https://api-capital.backend-capital.com/api/v1"
 
+
 class CapitalClient:
     def __init__(self):
         self.api_key = settings.capital_api_key
-        self.base_url = BASE_URL_DEMO if settings.capital_mode == "demo" else BASE_URL_LIVE
+        self.base_url = (
+            BASE_URL_DEMO if settings.capital_mode == "demo"
+            else BASE_URL_LIVE
+        )
         self.session_token = None
         self.account_token = None
 
     async def create_session(self) -> bool:
+        if not settings.capital_email or not settings.capital_password:
+            print("Capital.com credentials not configured")
+            return False
         try:
             async with aiohttp.ClientSession() as s:
                 r = await s.post(
@@ -109,7 +116,7 @@ class CapitalClient:
                         "balance": balance.get("balance", 0),
                         "available": balance.get("available", 0),
                         "profit_loss": balance.get("pnl", 0),
-                        "currency": accounts[0].get("preferred", "EUR"),
+                        "currency": "EUR",
                         "mode": settings.capital_mode
                     }
                 return {"balance": 0, "available": 0}
@@ -185,5 +192,6 @@ class CapitalClient:
                 }
         except Exception as e:
             return {"status": "error", "reason": str(e)}
+
 
 capital_client = CapitalClient()
