@@ -5,7 +5,7 @@ from datetime import datetime
 
 MAX_RISK_PER_TRADE_PCT = 0.02
 MAX_OPEN_TRADES = 3
-MIN_RR = 1.5
+MIN_RR = 2.5
 
 class CapitalExecutor:
     def __init__(self):
@@ -25,10 +25,12 @@ class CapitalExecutor:
         if balance == 0:
             return {"allowed": False, "reason": "Zero balance"}
         if len(self.open_trades) >= MAX_OPEN_TRADES:
-            return {"allowed": False, "reason": f"Max {MAX_OPEN_TRADES} open trades reached"}
+            return {"allowed": False,
+                    "reason": f"Max {MAX_OPEN_TRADES} open trades reached"}
         daily_loss_limit = balance * self.daily_loss_limit_pct
         if self.daily_pnl <= -daily_loss_limit:
-            return {"allowed": False, "reason": f"Daily loss limit hit: {self.daily_pnl:.2f}"}
+            return {"allowed": False,
+                    "reason": f"Daily loss limit hit: {self.daily_pnl:.2f}"}
         return {"allowed": True, "balance": balance}
 
     def calculate_size(self, balance: float, stop_distance_pct: float) -> float:
@@ -43,6 +45,7 @@ class CapitalExecutor:
         check = await self.can_trade()
         if not check["allowed"]:
             return {"status": "blocked", "reason": check["reason"]}
+
         balance = check["balance"]
         ticker = signal["ticker"]
         epic = get_epic(ticker)
@@ -51,29 +54,22 @@ class CapitalExecutor:
         stop_loss = signal.get("stop_loss", 0)
         tp1 = signal.get("tp1", 0)
         rr = signal.get("rr", 0)
+
         if rr < MIN_RR:
-            return {"status": "blocked", "reason": f"R:R {rr} below minimum {MIN_RR}"}
+            return {"status": "blocked",
+                    "reason": f"R:R {rr} below minimum {MIN_RR}"}
+
         entry_price = entry[0] if isinstance(entry, list) else entry
         if entry_price == 0 or stop_loss == 0 or tp1 == 0:
             return {"status": "blocked", "reason": "Invalid entry/stop/tp levels"}
+
         stop_distance_pct = abs(entry_price - stop_loss) / entry_price * 100
         size = self.calculate_size(balance, stop_distance_pct)
+
         if not capital_client.session_token:
             await capital_client.create_session()
-        direction = "BUY" if action == "buy" else "SELL"
-        
-        current_price = entry_price
-        min_stop_distance = current_price * 0.003
-        
-        if action == "buy":
-            if current_price - stop_loss < min_stop_distance:
-                stop_loss = round(current_price - min_stop_distance, 2)
-                print(f"Stop loss adjusted to minimum distance: {stop_loss}")
-        else:
-            if stop_loss - current_price < min_stop_distance:
-                stop_loss = round(current_price + min_stop_distance, 2)
-                print(f"Stop loss adjusted to minimum distance: {stop_loss}")
 
+        direction = "BUY" if action == "buy" else "SELL"
         result = await capital_client.place_order(
             epic=epic,
             direction=direction,
@@ -81,6 +77,7 @@ class CapitalExecutor:
             stop_loss=stop_loss,
             take_profit=tp1
         )
+
         if result["status"] == "success":
             trade = {
                 "deal_id": result["deal_id"],
