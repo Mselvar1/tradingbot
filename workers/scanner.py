@@ -7,6 +7,7 @@ from services.data.news import get_news
 from services.risk import risk
 from services.signal_history import history
 from services.execution.capital_executor import executor
+from services.memory import init_db, save_signal, get_memory_context
 from claude.client import analyse, review_signal
 from claude.prompts.analysis import ANALYSIS_PROMPT, REVIEW_PROMPT
 from config.settings import settings
@@ -165,10 +166,13 @@ async def scan_gold(market_context: dict):
             for f in pd["fvg_zones"]
         )
 
+    memory_context = await get_memory_context("GOLD")
+
     combined_news = (
         f"GOLD NEWS:\n{news_text}\n\n"
         f"MACRO & GEOPOLITICAL:\n{geo_text}\n\n"
         f"MARKET REGIME: VIX {sentiment.get('vix', 0)} — {sentiment.get('regime', 'unknown')}\n\n"
+        f"HISTORICAL PERFORMANCE:\n{memory_context}\n\n"
         f"SMC DATA:\n{fvg_text}\n"
         f"Session high: {pd.get('session_high', 0)}\n"
         f"Session low: {pd.get('session_low', 0)}\n"
@@ -216,44 +220,6 @@ async def scan_gold(market_context: dict):
         action = "buy" if trend == "bullish" else "sell"
         print(f"Gold: forced action to {action} based on trend ({trend})")
 
-    review_prompt = REVIEW_PROMPT.format(
-        ticker="GOLD",
-        action=action,
-        market_structure=result.get("market_structure", "unknown"),
-        bos_detected=result.get("bos_detected", False),
-        choch_detected=result.get("choch_detected", False),
-        fvg_present=result.get("fvg_present", False),
-        fvg_zone=result.get("fvg_zone", "none"),
-        order_block_present=result.get("order_block_present", False),
-        order_block_zone=result.get("order_block_zone", "none"),
-        liquidity_sweep_detected=result.get("liquidity_sweep_detected", False),
-        session_context=session,
-        confluences=result.get("confluences", []),
-        trading_verdict=trading_verdict,
-        entry=result.get("entry_zone", "n/a"),
-        entry_trigger=result.get("entry_trigger", "n/a"),
-        stop_loss=result.get("stop_loss", "n/a"),
-        stop_loss_pct=result.get("stop_loss_pct", "n/a"),
-        stop_loss_reason=result.get("stop_loss_reason", "n/a"),
-        tp1=result.get("take_profit_1", "n/a"),
-        tp1_pct=result.get("take_profit_1_pct", "n/a"),
-        tp2=result.get("take_profit_2", "n/a"),
-        tp2_pct=result.get("take_profit_2_pct", "n/a"),
-        tp3=result.get("take_profit_3", "n/a"),
-        tp3_pct=result.get("take_profit_3_pct", "n/a"),
-        rr=result.get("risk_reward", "n/a"),
-        timeframe=result.get("timeframe", "n/a"),
-        confidence=confidence,
-        summary=result.get("analysis_summary", "n/a"),
-        invalidation=result.get("invalidation", "n/a"),
-        news_catalyst=result.get("news_catalyst", "n/a"),
-        price=pd["price"],
-        rsi=pd["rsi"],
-        volume_ratio=pd["volume_ratio"],
-        sentiment=sentiment_text,
-        news=combined_news
-    )
-
     review = {
         "approved": True,
         "final_confidence": confidence,
@@ -264,32 +230,6 @@ async def scan_gold(market_context: dict):
         "stop_loss_adjustment": None,
         "stop_loss_adjustment_reason": None
     }
-    final_confidence = confidence
-
-    if "error" in review:
-        review = {
-            "approved": True,
-            "final_confidence": confidence,
-            "concerns": [],
-            "final_verdict": "TAKE TRADE",
-            "review_summary": "Auto-approved (reviewer unavailable)",
-            "best_entry_time": "current session",
-            "stop_loss_adjustment": None,
-            "stop_loss_adjustment_reason": None
-        }
-    else:
-        concerns = review.get("concerns", [])
-        if not review.get("approved", False):
-            if len(concerns) <= 4:
-                print(f"Gold: minor concerns ({len(concerns)}) — proceeding")
-                review["approved"] = True
-            else:
-                print(f"Gold: rejected — {concerns}")
-                return None
-        final_confidence = review.get("final_confidence", confidence)
-        if final_confidence < REVIEW_THRESHOLD:
-            print(f"Gold: final confidence {final_confidence} too low")
-            return None
 
     final_confidence = review.get("final_confidence", confidence)
     sl = review.get("stop_loss_adjustment") or result.get("stop_loss", 0)
@@ -419,6 +359,7 @@ async def format_signal(signal: dict) -> str:
 
 async def run_scanner(bot, chat_id: int):
     print("Gold scalping scanner started...")
+    await init_db()
     last_signal_time = None
     min_signal_gap = 300
     while True:
@@ -446,8 +387,10 @@ async def run_scanner(bot, chat_id: int):
                         except Exception as e:
                             print(f"Channel post failed: {e}")
                     history.save(signal)
+                    signal_id = await save_signal(signal)
+                    signal["db_id"] = signal_id
                     last_signal_time = now
-                    print("Gold signal sent and saved")
+                    print(f"Gold signal sent and saved (db_id: {signal_id})")
                     trade_result = await executor.place_trade(signal)
                     if trade_result["status"] == "success":
                         trade = trade_result["trade"]
