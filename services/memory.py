@@ -58,6 +58,20 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS position_updates (
+                id            SERIAL PRIMARY KEY,
+                deal_id       VARCHAR(100),
+                ticker        VARCHAR(20),
+                direction     VARCHAR(10),
+                entry_price   FLOAT,
+                old_stop      FLOAT,
+                new_stop      FLOAT,
+                current_price FLOAT,
+                update_type   VARCHAR(20),
+                created_at    TIMESTAMP DEFAULT NOW()
+            )
+        """)
     print("Database initialized")
 
 async def save_signal(signal: dict) -> int:
@@ -121,6 +135,28 @@ async def save_outcome(signal_id: int, outcome: dict):
             )
     except Exception as e:
         print(f"Save outcome error: {e}")
+
+async def save_position_update(update: dict):
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO position_updates (
+                    deal_id, ticker, direction, entry_price,
+                    old_stop, new_stop, current_price, update_type
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            """,
+                update.get("deal_id", ""),
+                update.get("ticker", ""),
+                update.get("direction", ""),
+                float(update.get("entry_price", 0)),
+                float(update.get("old_stop", 0)),
+                float(update.get("new_stop", 0)),
+                float(update.get("current_price", 0)),
+                update.get("update_type", ""),
+            )
+    except Exception as e:
+        print(f"Save position update error: {e}")
 
 async def get_recent_outcomes(ticker: str = "GOLD", limit: int = 20) -> list:
     try:

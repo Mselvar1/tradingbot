@@ -190,6 +190,29 @@ class CapitalClient:
         except Exception as e:
             return {"status": "error", "reason": str(e)}
 
+    async def update_stop_loss(self, deal_id: str, stop_loss: float,
+                               take_profit: float) -> dict:
+        """Update stop loss (and optionally TP) on an open position."""
+        try:
+            payload = {"stopLevel": stop_loss}
+            if take_profit:
+                payload["profitLevel"] = take_profit
+            async with aiohttp.ClientSession() as s:
+                r = await s.put(
+                    f"{self.base_url}/positions/{deal_id}",
+                    headers=self.get_headers(),
+                    json=payload
+                )
+                d = await r.json()
+                if r.status == 200:
+                    return {"status": "success", "deal_reference": d.get("dealReference")}
+                else:
+                    err = d.get("errorCode", d.get("error", "unknown"))
+                    print(f"update_stop_loss failed — {deal_id} status={r.status} err={err}")
+                    return {"status": "error", "reason": err}
+        except Exception as e:
+            return {"status": "error", "reason": str(e)}
+
     async def get_deal_confirmation(self, deal_reference: str) -> dict:
         """
         Fetch the confirmed dealId for an order.
