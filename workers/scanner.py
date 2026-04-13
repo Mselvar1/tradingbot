@@ -14,8 +14,8 @@ from config.settings import settings
 
 GOLD_EPIC = "GOLD"
 SCAN_INTERVAL = 120
-CONFIDENCE_THRESHOLD = 70
-REVIEW_THRESHOLD = 65
+CONFIDENCE_THRESHOLD = 60
+REVIEW_THRESHOLD = 60
 MAX_CANDLES = 100
 
 
@@ -368,7 +368,7 @@ async def run_scanner(bot, chat_id: int):
     print("Gold scalping scanner started...")
     await init_db()
     last_signal_time = None
-    min_signal_gap = 1800
+    min_signal_gap = 900
     while True:
         try:
             if is_trading_session():
