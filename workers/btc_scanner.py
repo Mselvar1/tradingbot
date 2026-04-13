@@ -8,7 +8,7 @@ from services.risk import risk
 from services.signal_history import history
 from services.execution.capital_executor import executor
 from services.memory import save_signal, get_memory_context
-from claude.client import analyse
+from claude.client import analyse_btc as analyse
 from claude.prompts.btc_analysis import BTC_ANALYSIS_PROMPT
 from config.settings import settings
 

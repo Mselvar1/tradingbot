@@ -18,6 +18,21 @@ async def analyse(prompt: str) -> dict:
     except Exception:
         return {"error": "parse_failed", "raw": text}
 
+async def analyse_btc(prompt: str) -> dict:
+    """BTC scanner uses Haiku — 80% cheaper, fast enough for 1-min scalp signals."""
+    msg = await client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    text = msg.content[0].text
+    try:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        return json.loads(text[start:end])
+    except Exception:
+        return {"error": "parse_failed", "raw": text}
+
 async def review_signal(prompt: str) -> dict:
     msg = await client.messages.create(
         model="claude-sonnet-4-20250514",
