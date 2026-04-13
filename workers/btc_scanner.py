@@ -12,16 +12,16 @@ from claude.client import analyse
 from claude.prompts.btc_analysis import BTC_ANALYSIS_PROMPT
 from config.settings import settings
 
-BTC_EPIC = "BITCOIN"        # used for /markets (price) and /positions (order placement)
+BTC_EPIC = "BTCUSD"         # used for /positions (order placement)
 
-# Capital.com uses different epic formats for /markets vs /prices endpoints.
+# Capital.com uses different epic formats across endpoints.
 # resolve_btc_epic() finds the working candle epic at startup and caches it.
 _BTC_EPIC_CANDIDATES = [
+    "BTCUSD",
     "BITCOIN",
     "CS.D.BITCOIN.TODAY.IP",
     "CS.D.BTCUSD.TODAY.IP",
     "BTC",
-    "BTCUSD",
 ]
 _btc_candle_epic: str | None = None
 
@@ -198,7 +198,7 @@ async def get_btc_data() -> dict:
     try:
         await capital_client.ensure_session()
         candle_epic = await resolve_btc_epic()
-        price_data  = await capital_client.get_price(BTC_EPIC)          # /markets/ uses BITCOIN fine
+        price_data  = await capital_client.get_price(candle_epic)
         candles_1m  = await capital_client.get_ohlcv(candle_epic, "MINUTE",   MAX_CANDLES_1M)
         candles_5m  = await capital_client.get_ohlcv(candle_epic, "MINUTE_5", MAX_CANDLES_5M)
 

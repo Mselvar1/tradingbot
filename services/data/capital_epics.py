@@ -1,5 +1,5 @@
 EPIC_MAP = {
-    "BTC-USD": "BITCOIN",
+    "BTC-USD": "BTCUSD",
     "ETH-USD": "ETHEREUM",
     "NVDA": "NVDA",
     "XAUUSD=X": "GOLD",
