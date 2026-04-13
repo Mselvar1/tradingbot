@@ -190,6 +190,37 @@ class CapitalClient:
         except Exception as e:
             return {"status": "error", "reason": str(e)}
 
+    async def get_deal_confirmation(self, deal_reference: str) -> dict:
+        """
+        Fetch the confirmed dealId for an order.
+
+        Capital.com place_order returns a dealReference (temporary).
+        The permanent dealId — needed for closing positions — is only
+        available via GET /confirms/{dealReference}.
+        """
+        try:
+            async with aiohttp.ClientSession() as s:
+                r = await s.get(
+                    f"{self.base_url}/confirms/{deal_reference}",
+                    headers=self.get_headers()
+                )
+                d = await r.json()
+                return {
+                    "deal_id":        d.get("dealId"),
+                    "deal_reference": d.get("dealReference"),
+                    "status":         d.get("dealStatus"),   # ACCEPTED / REJECTED
+                    "reason":         d.get("reason"),
+                    "entry_price":    d.get("level"),
+                    "size":           d.get("size"),
+                    "direction":      d.get("direction"),
+                    "stop_loss":      d.get("stopLevel"),
+                    "take_profit":    d.get("profitLevel"),
+                    "epic":           d.get("epic"),
+                }
+        except Exception as e:
+            print(f"Capital confirmation error ({deal_reference}): {e}")
+            return {}
+
     async def search_market(self, term: str) -> list:
         """Search Capital.com markets by name to discover correct epic codes."""
         try:

@@ -655,6 +655,7 @@ async def run_btc_scanner(bot, chat_id: int):
                         trade_msg = (
                             f"BTC TRADE PLACED\n"
                             f"BTC-USD {signal['action'].upper()}\n"
+                            f"Deal ID: {trade['deal_id']}\n"
                             f"Confidence: {signal['confidence']}/100\n"
                             f"Size: {trade['size']} units\n"
                             f"Entry: {_p(trade['entry_price'])}\n"

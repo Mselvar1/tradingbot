@@ -401,8 +401,9 @@ async def run_scanner(bot, chat_id: int):
                     if trade_result["status"] == "success":
                         trade = trade_result["trade"]
                         trade_msg = (
-                            f"TRADE PLACED — DEMO\n"
+                            f"TRADE PLACED\n"
                             f"GOLD {signal['action'].upper()}\n"
+                            f"Deal ID: {trade['deal_id']}\n"
                             f"Size: {trade['size']} units\n"
                             f"Entry: {trade['entry_price']}\n"
                             f"Stop: {trade['stop_loss']}\n"

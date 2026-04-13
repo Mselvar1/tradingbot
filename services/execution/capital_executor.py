@@ -111,20 +111,34 @@ class CapitalExecutor:
         )
 
         if result["status"] == "success":
+            deal_reference = result["deal_id"]   # temporary reference from order response
+
+            # Fetch the permanent dealId from the confirms endpoint
+            confirm = await capital_client.get_deal_confirmation(deal_reference)
+            deal_id      = confirm.get("deal_id") or deal_reference   # fallback to reference
+            deal_status  = confirm.get("status", "UNKNOWN")
+            actual_entry = confirm.get("entry_price") or entry_price
+
+            if deal_status == "REJECTED":
+                return {"status": "error",
+                        "reason": f"Order rejected by Capital.com: {confirm.get('reason')}"}
+
             trade = {
-                "deal_id": result["deal_id"],
-                "ticker": ticker,
-                "epic": epic,
-                "direction": direction,
-                "size": size,
-                "entry_price": entry_price,
-                "stop_loss": stop_loss,
-                "take_profit": tp1,
-                "opened_at": datetime.utcnow().isoformat(),
+                "deal_id":        deal_id,
+                "deal_reference": deal_reference,
+                "ticker":         ticker,
+                "epic":           epic,
+                "direction":      direction,
+                "size":           size,
+                "entry_price":    actual_entry,
+                "stop_loss":      stop_loss,
+                "take_profit":    tp1,
+                "opened_at":      datetime.utcnow().isoformat(),
                 "balance_at_open": balance
             }
-            self.open_trades[result["deal_id"]] = trade
+            self.open_trades[deal_id] = trade
             self.trade_log.append(trade)
+            print(f"Trade confirmed — dealId={deal_id} ref={deal_reference} status={deal_status}")
             return {"status": "success", "trade": trade}
         else:
             return {"status": "error", "reason": result}
