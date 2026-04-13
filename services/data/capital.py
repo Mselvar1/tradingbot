@@ -183,11 +183,49 @@ class CapitalClient:
                     json=payload
                 )
                 d = await r.json()
-                return {
-                    "status": "success" if r.status == 200 else "error",
-                    "deal_id": d.get("dealReference"),
-                    "response": d
-                }
+                if r.status == 200:
+                    return {"status": "success", "deal_id": d.get("dealReference"), "response": d}
+
+                err = d.get("errorCode", "")
+
+                # Capital.com enforces a minimum distance between entry and stop.
+                # The error gives us the exact allowed boundary — clamp and retry once.
+                # e.g. "error.invalid.stoploss.maxvalue: 73114.25"  (BUY: stop too high)
+                #      "error.invalid.stoploss.minvalue: 73191.75"  (SELL: stop too low)
+                adjusted_stop = None
+                if "invalid.stoploss.maxvalue" in err:
+                    try:
+                        adjusted_stop = float(err.split(":")[-1].strip())
+                        # Add a small buffer below the boundary so we're safely outside
+                        adjusted_stop = round(adjusted_stop * 0.9998, 2)
+                    except ValueError:
+                        pass
+                elif "invalid.stoploss.minvalue" in err:
+                    try:
+                        adjusted_stop = float(err.split(":")[-1].strip())
+                        adjusted_stop = round(adjusted_stop * 1.0002, 2)
+                    except ValueError:
+                        pass
+
+                if adjusted_stop is not None:
+                    print(
+                        f"Stop distance too tight ({stop_loss}) — "
+                        f"retrying with Capital.com boundary {adjusted_stop}"
+                    )
+                    payload["stopLevel"] = adjusted_stop
+                    r2 = await s.post(
+                        f"{self.base_url}/positions",
+                        headers=self.get_headers(),
+                        json=payload
+                    )
+                    d2 = await r2.json()
+                    if r2.status == 200:
+                        return {"status": "success", "deal_id": d2.get("dealReference"), "response": d2}
+                    err = d2.get("errorCode", d2.get("error", "unknown"))
+                    print(f"Retry also failed — {err}")
+                    return {"status": "error", "deal_id": None, "response": d2}
+
+                return {"status": "error", "deal_id": None, "response": d}
         except Exception as e:
             return {"status": "error", "reason": str(e)}
 
