@@ -73,28 +73,6 @@ async def init_db():
                 created_at    TIMESTAMP DEFAULT NOW()
             )
         """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS limit_orders (
-                id             SERIAL PRIMARY KEY,
-                deal_id        VARCHAR(100),
-                deal_reference VARCHAR(100),
-                ticker         VARCHAR(20),
-                epic           VARCHAR(50),
-                direction      VARCHAR(10),
-                size           FLOAT,
-                level_price    FLOAT,
-                level_type     VARCHAR(30),
-                level_key      VARCHAR(120),
-                stop_loss      FLOAT,
-                take_profit    FLOAT,
-                atr            FLOAT,
-                status         VARCHAR(20) DEFAULT 'pending',
-                placed_at      TIMESTAMP DEFAULT NOW(),
-                expires_at     TIMESTAMP,
-                filled_at      TIMESTAMP,
-                cancelled_at   TIMESTAMP
-            )
-        """)
         # ── Extend outcomes table for self-learning ────────────────────────
         await conn.execute(
             "ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS rsi_at_entry FLOAT"
@@ -257,90 +235,6 @@ async def get_win_rate(ticker: str = "GOLD") -> dict:
             }
     except Exception as e:
         return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0}
-
-async def save_limit_order(order: dict) -> int:
-    """Persist a newly-placed limit order to the database."""
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                INSERT INTO limit_orders (
-                    deal_id, deal_reference, ticker, epic, direction, size,
-                    level_price, level_type, level_key,
-                    stop_loss, take_profit, atr, status,
-                    placed_at, expires_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-                RETURNING id
-            """,
-                order.get("deal_id", ""),
-                order.get("deal_reference", ""),
-                order.get("ticker", ""),
-                order.get("epic", ""),
-                order.get("direction", ""),
-                float(order.get("size", 0)),
-                float(order.get("level_price", 0)),
-                order.get("level_type", ""),
-                order.get("level_key", ""),
-                float(order.get("stop_loss", 0)),
-                float(order.get("take_profit", 0)),
-                float(order.get("atr", 0)),
-                "pending",
-                datetime.datetime.utcfromtimestamp(order.get("placed_at", time.time())),
-                datetime.datetime.utcfromtimestamp(order.get("expires_at", time.time())),
-            )
-            return row["id"]
-    except Exception as e:
-        print(f"Save limit order error: {e}")
-        return 0
-
-
-async def update_limit_order_status(deal_id: str, status: str):
-    """Update the status of a limit order (filled / cancelled)."""
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            if status == "filled":
-                await conn.execute(
-                    "UPDATE limit_orders SET status=$1, filled_at=NOW() WHERE deal_id=$2",
-                    status, deal_id
-                )
-            elif status in ("cancelled", "expiry_cancel_failed"):
-                await conn.execute(
-                    "UPDATE limit_orders SET status=$1, cancelled_at=NOW() WHERE deal_id=$2",
-                    status, deal_id
-                )
-            else:
-                await conn.execute(
-                    "UPDATE limit_orders SET status=$1 WHERE deal_id=$2",
-                    status, deal_id
-                )
-    except Exception as e:
-        print(f"Update limit order error: {e}")
-
-
-async def get_pending_limit_orders() -> list:
-    """Return all pending limit orders that have not yet expired (for restart recovery)."""
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT * FROM limit_orders
-                WHERE status = 'pending'
-                  AND expires_at > NOW()
-                ORDER BY placed_at DESC
-            """)
-            result = []
-            for r in rows:
-                d = dict(r)
-                # Convert timestamps to unix floats for in-memory use
-                d["placed_at"]  = d["placed_at"].timestamp()  if d.get("placed_at")  else time.time()
-                d["expires_at"] = d["expires_at"].timestamp() if d.get("expires_at") else time.time()
-                result.append(d)
-            return result
-    except Exception as e:
-        print(f"Get pending limit orders error: {e}")
-        return []
-
 
 async def save_trade_insight(insight: dict) -> int:
     """Persist a pattern-analysis snapshot to trade_insights."""

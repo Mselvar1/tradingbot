@@ -191,23 +191,63 @@ def _build_message(pos: dict, state: dict, old_stop: float,
 
 # ─── Main Loop ────────────────────────────────────────────────────────────────
 
-async def _handle_closed_positions(closed_ids: set, session: str) -> None:
+async def _handle_closed_positions(closed_ids: set, session: str, bot, chat_id: int) -> None:
     """Record outcomes for any deal_ids that disappeared this cycle."""
     for deal_id in closed_ids:
         state = _states.get(deal_id)
         if not state:
             continue
-        hold_secs = time.time() - state.get("opened_at", time.time())
+        hold_secs  = time.time() - state.get("opened_at", time.time())
+        entry      = state["original_entry"]
+        last_price = state.get("last_price", entry)
+        direction  = state["direction"]
+        ticker     = state.get("ticker", "UNKNOWN")
+        tp1        = state["tp1"]
+
+        if direction == "BUY":
+            pnl_pct = round((last_price - entry) / entry * 100, 3) if entry else 0.0
+        else:
+            pnl_pct = round((entry - last_price) / entry * 100, 3) if entry else 0.0
+
+        hold_mins = max(1, int(hold_secs / 60))
+
+        # Infer result label for the notification
+        result_label = "WIN" if pnl_pct > 0 else "LOSS"
+
+        def fmt(v):
+            try:
+                return f"${float(v):,.2f}"
+            except Exception:
+                return str(v)
+
+        try:
+            close_msg = (
+                f"───────────────────\n"
+                f"TRADE CLOSED\n"
+                f"───────────────────\n"
+                f"{ticker} {direction}\n"
+                f"Result: {result_label}\n\n"
+                f"Entry:    {fmt(entry)}\n"
+                f"Exit:     {fmt(last_price)}\n"
+                f"P&L:      {pnl_pct:+.3f}%\n"
+                f"Held:     {hold_mins} min\n"
+                f"Session:  {session}\n"
+                f"───────────────────"
+            )
+            await bot.send_message(chat_id=chat_id, text=close_msg)
+        except Exception as e:
+            print(f"Monitor: failed to send close notification — {e}")
+
         await record_closed_position(
-            deal_id     = deal_id,
-            entry       = state["original_entry"],
-            last_price  = state.get("last_price", state["original_entry"]),
+            deal_id      = deal_id,
+            entry        = entry,
+            last_price   = last_price,
             current_stop = state.get("current_stop", state["original_stop"]),
-            tp1         = state["tp1"],
-            direction   = state["direction"],
-            hold_secs   = hold_secs,
-            ticker      = state.get("ticker", "UNKNOWN"),
-            session     = session,
+            tp1          = tp1,
+            direction    = direction,
+            hold_secs    = hold_secs,
+            ticker       = ticker,
+            session      = session,
         )
         del _states[deal_id]
 
@@ -230,7 +270,7 @@ async def run_position_monitor(bot, chat_id: int):
                 # All positions closed — record outcomes for everything we knew
                 if _prev_open_ids:
                     closed = set(_prev_open_ids)
-                    await _handle_closed_positions(closed, session)
+                    await _handle_closed_positions(closed, session, bot, chat_id)
                 _states.clear()
                 _prev_open_ids = set()
                 continue
@@ -241,7 +281,7 @@ async def run_position_monitor(bot, chat_id: int):
             closed_ids = _prev_open_ids - current_ids
             if closed_ids:
                 print(f"Monitor: {len(closed_ids)} position(s) closed — recording outcomes")
-                await _handle_closed_positions(closed_ids, session)
+                await _handle_closed_positions(closed_ids, session, bot, chat_id)
 
             # ── Update last_price snapshot for all live positions ──────────
             for pos in positions:
@@ -305,9 +345,10 @@ async def run_position_monitor(bot, chat_id: int):
                     "update_type":   update_type,
                 })
 
-                # Telegram notification
-                msg = _build_message(pos, state, old_stop, new_stop, update_type)
-                await bot.send_message(chat_id=chat_id, text=msg)
+                # Only notify Telegram on breakeven — trailing updates are silent
+                if update_type == "breakeven":
+                    msg = _build_message(pos, state, old_stop, new_stop, update_type)
+                    await bot.send_message(chat_id=chat_id, text=msg)
 
             # ── Advance prev-ids for next cycle ───────────────────────────
             _prev_open_ids = current_ids
