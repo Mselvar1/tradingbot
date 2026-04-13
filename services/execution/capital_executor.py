@@ -4,9 +4,10 @@ from services.risk import risk
 from config.settings import settings
 from datetime import datetime
 
-MAX_RISK_PER_TRADE_PCT = 0.02
+MAX_RISK_PER_TRADE_PCT = 0.02   # 2% of account balance risked per trade
 MAX_OPEN_TRADES = 3
 MIN_RR = 1.8
+
 
 class CapitalExecutor:
     def __init__(self):
@@ -36,13 +37,29 @@ class CapitalExecutor:
                     "reason": f"Daily loss limit hit: {self.daily_pnl:.2f}"}
         return {"allowed": True, "balance": balance}
 
-    def calculate_size(self, balance: float, stop_distance_pct: float) -> float:
-        risk_amount = balance * MAX_RISK_PER_TRADE_PCT
-        if stop_distance_pct <= 0:
-            return 0.1
-        size = risk_amount / (stop_distance_pct / 100 * balance)
-        size = round(max(0.1, min(size, 1.0)), 1)
-        return size
+    def calculate_size(self, balance: float, entry_price: float,
+                       stop_distance_pct: float) -> float:
+        """
+        Correct risk-based position sizing.
+
+        size = risk_amount_usd / stop_loss_usd_per_unit
+
+        Example — BTC at $84,000, $1,000 balance, 2% risk, 0.3% stop:
+          risk_amount   = $1,000 × 0.02 = $20
+          stop_per_unit = $84,000 × 0.003 = $252
+          size          = $20 / $252 = 0.079 BTC  ✓
+
+        Example — Gold at $4,700, $1,000 balance, 2% risk, 0.5% stop:
+          risk_amount   = $20
+          stop_per_unit = $4,700 × 0.005 = $23.50
+          size          = $20 / $23.50 = 0.851 oz  ✓
+        """
+        if stop_distance_pct <= 0 or entry_price <= 0:
+            return 0.01
+        risk_amount   = balance * MAX_RISK_PER_TRADE_PCT
+        stop_per_unit = entry_price * (stop_distance_pct / 100)
+        size = risk_amount / stop_per_unit
+        return round(max(0.01, size), 3)
 
     async def place_trade(self, signal: dict) -> dict:
         check = await self.can_trade()
@@ -58,19 +75,31 @@ class CapitalExecutor:
         tp1 = signal.get("tp1", 0)
         rr = signal.get("rr", 0)
 
-        if rr < MIN_RR:
+        # rr can arrive as a string ("n/a") from Claude — handle safely
+        try:
+            rr_val = float(rr)
+        except (TypeError, ValueError):
+            rr_val = 0.0
+
+        if rr_val < MIN_RR:
             return {"status": "blocked",
                     "reason": f"R:R {rr} below minimum {MIN_RR}"}
 
         entry_price = entry[0] if isinstance(entry, list) else entry
+        try:
+            entry_price = float(entry_price)
+            stop_loss   = float(stop_loss)
+            tp1         = float(tp1)
+        except (TypeError, ValueError):
+            return {"status": "blocked", "reason": "Invalid entry/stop/tp levels"}
+
         if entry_price == 0 or stop_loss == 0 or tp1 == 0:
             return {"status": "blocked", "reason": "Invalid entry/stop/tp levels"}
 
         stop_distance_pct = abs(entry_price - stop_loss) / entry_price * 100
-        size = self.calculate_size(balance, stop_distance_pct)
+        size = self.calculate_size(balance, entry_price, stop_distance_pct)
 
-        if not capital_client.session_token:
-            await capital_client.create_session()
+        await capital_client.ensure_session()
 
         direction = "BUY" if action == "buy" else "SELL"
         result = await capital_client.place_order(
@@ -109,5 +138,6 @@ class CapitalExecutor:
             "daily_pnl": round(self.daily_pnl, 2),
             "total_trades": len(self.trade_log)
         }
+
 
 executor = CapitalExecutor()
