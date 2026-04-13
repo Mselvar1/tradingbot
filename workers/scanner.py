@@ -14,8 +14,8 @@ from config.settings import settings
 
 GOLD_EPIC = "GOLD"
 SCAN_INTERVAL = 120
-CONFIDENCE_THRESHOLD = 30
-REVIEW_THRESHOLD = 30
+CONFIDENCE_THRESHOLD = 70
+REVIEW_THRESHOLD = 65
 MAX_CANDLES = 100
 
 
@@ -111,16 +111,23 @@ async def has_scalp_setup(pd: dict) -> bool:
     change_pct = abs(pd.get("change_pct", 0))
     atr = pd.get("atr", 0)
     price = pd.get("price", 0)
-    if rsi > 65 or rsi < 35:
-        return True
-    if change_pct > 0.15:
-        return True
-    if atr > 0 and price > 0 and (atr / price * 100) > 0.1:
-        return True
-    for fvg in pd.get("fvg_zones", []):
+    fvg_zones = pd.get("fvg_zones", [])
+    score = 0
+    if rsi > 68 or rsi < 32:
+        score += 2
+    elif rsi > 63 or rsi < 37:
+        score += 1
+    if change_pct > 0.4:
+        score += 2
+    elif change_pct > 0.2:
+        score += 1
+    if atr > 0 and price > 0 and (atr / price * 100) > 0.2:
+        score += 1
+    for fvg in fvg_zones:
         if fvg["low"] <= price <= fvg["high"]:
-            return True
-    return False
+            score += 2
+            break
+    return score >= 3
 
 
 async def scan_gold(market_context: dict):
@@ -361,7 +368,7 @@ async def run_scanner(bot, chat_id: int):
     print("Gold scalping scanner started...")
     await init_db()
     last_signal_time = None
-    min_signal_gap = 300
+    min_signal_gap = 1800
     while True:
         try:
             if is_trading_session():
