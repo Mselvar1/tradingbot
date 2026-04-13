@@ -12,6 +12,7 @@ from workers.scanner import run_scanner
 from workers.btc_scanner import run_btc_scanner
 from workers.position_monitor import run_position_monitor
 from workers.level_monitor import run_level_monitor
+from workers.weekly_report import run_weekly_report
 from config.settings import settings
 
 async def post_init(app):
@@ -35,7 +36,8 @@ async def post_init(app):
     asyncio.create_task(run_btc_scanner(app.bot, chat_id))
     asyncio.create_task(run_position_monitor(app.bot, chat_id))
     asyncio.create_task(run_level_monitor(app.bot, chat_id))
-    print(f"Gold + BTC scanners + position monitor + level monitor started for chat_id: {chat_id}")
+    asyncio.create_task(run_weekly_report(app.bot, chat_id))
+    print(f"Gold + BTC scanners + position/level monitors + weekly report started for chat_id: {chat_id}")
 
 def main():
     app = (

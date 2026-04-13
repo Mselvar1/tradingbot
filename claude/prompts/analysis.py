@@ -90,6 +90,8 @@ TRADING VERDICT RULES:
 - "DO NOT TRADE" — no clear setup, choppy price action, news risk
 - "AVOID" — high impact event, low volume, or against higher TF structure
 
+{learned_patterns}
+
 Return exactly this structure:
 {{
   "ticker": "{ticker}",

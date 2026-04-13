@@ -19,16 +19,36 @@ re-initialise from live Capital.com data on the first check.
 
 import asyncio
 import datetime
+import time
 from services.data.capital import capital_client
 from services.memory import save_position_update
 from services.risk import risk
+from services.learning import record_closed_position
 
 MONITOR_INTERVAL = 120    # seconds between checks
 
 # Per-deal state: tracks breakeven status and original levels
 # { deal_id: { breakeven_done, original_stop, original_entry, tp1,
-#              breakeven_trigger, trail_distance } }
+#              breakeven_trigger, trail_distance,
+#              opened_at, last_price, current_stop, ticker, session_at_open } }
 _states: dict = {}
+
+# Deal IDs seen in the PREVIOUS cycle — used to detect closures
+_prev_open_ids: set = set()
+
+
+def _current_session() -> str:
+    """Simplified session name for closure recording."""
+    now = datetime.datetime.utcnow()
+    t   = now.hour * 60 + now.minute
+    if now.weekday() >= 5:
+        return "WEEKEND"
+    if 8*60 <= t < 10*60:      return "LONDON OPEN"
+    if 10*60 <= t < 13*60+30:  return "LONDON MID"
+    if 13*60+30 <= t < 15*60+30: return "NY OPEN"
+    if 15*60+30 <= t < 17*60:  return "LONDON/NY OVERLAP"
+    if 17*60 <= t < 20*60:     return "NY SESSION"
+    return "OFF HOURS"
 
 
 # ─── State Management ─────────────────────────────────────────────────────────
@@ -51,16 +71,22 @@ def _init_state(deal_id: str, pos: dict) -> dict:
     else:
         be_trigger = entry
 
+    ticker = pos.get("name") or pos.get("epic") or "UNKNOWN"
+
     state = {
-        "breakeven_done":   False,
-        "original_stop":    stop,
-        "original_entry":   entry,
-        "tp1":              tp1,
-        "direction":        direction,
+        "breakeven_done":    False,
+        "original_stop":     stop,
+        "original_entry":    entry,
+        "tp1":               tp1,
+        "direction":         direction,
         "breakeven_trigger": round(be_trigger, 2),
-        # Trail at half the original stop distance — tight enough to protect
-        # profits, wide enough not to get stopped out by normal noise
-        "trail_distance":   round(orig_dist * 0.5, 2),
+        "trail_distance":    round(orig_dist * 0.5, 2),
+        # ── Self-learning fields ──────────────────────────────────────────
+        "opened_at":         time.time(),
+        "last_price":        _f(pos.get("current_price")),
+        "current_stop":      stop,      # updated whenever stop moves
+        "ticker":            ticker,
+        "session_at_open":   _current_session(),
     }
     _states[deal_id] = state
     return state
@@ -165,8 +191,30 @@ def _build_message(pos: dict, state: dict, old_stop: float,
 
 # ─── Main Loop ────────────────────────────────────────────────────────────────
 
+async def _handle_closed_positions(closed_ids: set, session: str) -> None:
+    """Record outcomes for any deal_ids that disappeared this cycle."""
+    for deal_id in closed_ids:
+        state = _states.get(deal_id)
+        if not state:
+            continue
+        hold_secs = time.time() - state.get("opened_at", time.time())
+        await record_closed_position(
+            deal_id     = deal_id,
+            entry       = state["original_entry"],
+            last_price  = state.get("last_price", state["original_entry"]),
+            current_stop = state.get("current_stop", state["original_stop"]),
+            tp1         = state["tp1"],
+            direction   = state["direction"],
+            hold_secs   = hold_secs,
+            ticker      = state.get("ticker", "UNKNOWN"),
+            session     = session,
+        )
+        del _states[deal_id]
+
+
 async def run_position_monitor(bot, chat_id: int):
     print("Position monitor started (2-minute interval)...")
+    global _prev_open_ids
 
     while True:
         await asyncio.sleep(MONITOR_INTERVAL)
@@ -176,18 +224,30 @@ async def run_position_monitor(bot, chat_id: int):
 
             await capital_client.ensure_session()
             positions = await capital_client.get_positions()
+            session   = _current_session()
 
             if not positions:
-                # Clean up state for deals that are no longer open
+                # All positions closed — record outcomes for everything we knew
+                if _prev_open_ids:
+                    closed = set(_prev_open_ids)
+                    await _handle_closed_positions(closed, session)
                 _states.clear()
+                _prev_open_ids = set()
                 continue
 
-            open_ids = {p.get("deal_id") for p in positions if p.get("deal_id")}
+            current_ids = {p.get("deal_id") for p in positions if p.get("deal_id")}
 
-            # Remove state for closed positions
-            for deal_id in list(_states.keys()):
-                if deal_id not in open_ids:
-                    del _states[deal_id]
+            # ── Detect closed positions (were open last cycle, gone now) ──
+            closed_ids = _prev_open_ids - current_ids
+            if closed_ids:
+                print(f"Monitor: {len(closed_ids)} position(s) closed — recording outcomes")
+                await _handle_closed_positions(closed_ids, session)
+
+            # ── Update last_price snapshot for all live positions ──────────
+            for pos in positions:
+                did = pos.get("deal_id")
+                if did and did in _states:
+                    _states[did]["last_price"] = _f(pos.get("current_price"))
 
             print(f"Monitor: checking {len(positions)} position(s)...")
 
@@ -220,6 +280,7 @@ async def run_position_monitor(bot, chat_id: int):
                 # Update in-memory state
                 if update_type == "breakeven":
                     state["breakeven_done"] = True
+                state["current_stop"] = new_stop   # track moving stop for outcome calc
 
                 ticker    = pos.get("name") or pos.get("epic") or "?"
                 direction = state["direction"]
@@ -247,6 +308,9 @@ async def run_position_monitor(bot, chat_id: int):
                 # Telegram notification
                 msg = _build_message(pos, state, old_stop, new_stop, update_type)
                 await bot.send_message(chat_id=chat_id, text=msg)
+
+            # ── Advance prev-ids for next cycle ───────────────────────────
+            _prev_open_ids = current_ids
 
         except Exception as e:
             print(f"Position monitor error: {e}")

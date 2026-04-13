@@ -10,6 +10,7 @@ from services.execution.capital_executor import executor
 from services.memory import init_db, save_signal, get_memory_context
 from claude.client import analyse, review_signal
 from services.rate_limiter import claude_limiter
+from services.learning import get_dynamic_threshold, get_prompt_injection, register_trade_signal
 from claude.prompts.analysis import ANALYSIS_PROMPT, REVIEW_PROMPT
 from config.settings import settings
 
@@ -165,6 +166,13 @@ async def scan_gold(market_context: dict):
     if not await claude_limiter.acquire("GOLD"):
         return None
 
+    # Dynamic threshold: may be lowered/raised based on session win rates
+    threshold = await get_dynamic_threshold("GOLD", session)
+    if threshold != CONFIDENCE_THRESHOLD:
+        print(f"Gold: dynamic threshold {threshold} (default {CONFIDENCE_THRESHOLD})")
+
+    learned_patterns = await get_prompt_injection("GOLD")
+
     sentiment = await get_market_sentiment()
     if sentiment.get("vix", 0) > 35:
         print(f"Gold: VIX too high ({sentiment['vix']}) — skipped")
@@ -218,7 +226,8 @@ async def scan_gold(market_context: dict):
         support=pd["support"],
         resistance=pd["resistance"],
         sentiment=sentiment_text,
-        news=combined_news
+        news=combined_news,
+        learned_patterns=learned_patterns,
     )
 
     print(f"Gold: analysing with Claude (RSI:{pd['rsi']} session:{session})...")
@@ -233,8 +242,8 @@ async def scan_gold(market_context: dict):
     trading_verdict = result.get("trading_verdict", "WAIT")
     print(f"Gold: {confidence}/100 {trading_verdict}")
 
-    if confidence < CONFIDENCE_THRESHOLD:
-        print("Gold: below threshold — skipped")
+    if confidence < threshold:
+        print(f"Gold: {confidence} below threshold {threshold} — skipped")
         return None
 
     if action not in ["buy", "sell"]:
@@ -428,6 +437,16 @@ async def run_scanner(bot, chat_id: int):
                         )
                         await bot.send_message(chat_id=chat_id, text=trade_msg)
                         print(f"Trade placed: {trade}")
+                        # Register deal→signal mapping for self-learning
+                        register_trade_signal(
+                            deal_id         = trade["deal_id"],
+                            signal_id       = signal.get("db_id", 0),
+                            ticker          = "GOLD",
+                            rsi             = signal.get("rsi", 0),
+                            trend_direction = signal.get("trading_verdict", ""),
+                            confluences     = signal.get("confluences", []),
+                            session         = signal.get("session_context", session),
+                        )
                     else:
                         print(f"Trade blocked: {trade_result['reason']}")
             else:

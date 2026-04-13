@@ -11,6 +11,7 @@ from services.memory import save_signal, get_memory_context
 from claude.client import analyse_btc as analyse
 from claude.prompts.btc_analysis import BTC_ANALYSIS_PROMPT
 from services.rate_limiter import claude_limiter
+from services.learning import get_dynamic_threshold, get_prompt_injection, register_trade_signal
 from config.settings import settings
 
 BTC_EPIC = "BTCUSD"         # used for /positions (order placement)
@@ -385,6 +386,13 @@ async def scan_btc(market_context: dict) -> dict | None:
     if not await claude_limiter.acquire("BTC"):
         return None
 
+    # Dynamic threshold: may be adjusted by historical session performance
+    threshold = await get_dynamic_threshold("BTC-USD", session)
+    if threshold != CONFIDENCE_THRESHOLD:
+        print(f"BTC: dynamic threshold {threshold} (default {CONFIDENCE_THRESHOLD})")
+
+    learned_patterns = await get_prompt_injection("BTC-USD")
+
     sentiment = await get_market_sentiment()
     btc_news  = await get_news("bitcoin BTC cryptocurrency crypto", max_articles=5)
     geo_news  = await get_geopolitical_news()
@@ -454,6 +462,7 @@ async def scan_btc(market_context: dict) -> dict | None:
         fear_greed=fear_greed.get("value", 50),
         fear_greed_label=fear_greed.get("label", "Neutral"),
         news=combined_news,
+        learned_patterns=learned_patterns,
     )
 
     print(f"BTC: analysing with Claude...")
@@ -469,8 +478,8 @@ async def scan_btc(market_context: dict) -> dict | None:
     setup      = result.get("setup_type", "?")
     print(f"BTC: {confidence}/100  {verdict}  ({setup})")
 
-    if confidence < CONFIDENCE_THRESHOLD:
-        print("BTC: below threshold — skipped")
+    if confidence < threshold:
+        print(f"BTC: {confidence} below threshold {threshold} — skipped")
         return None
 
     if action not in ("buy", "sell"):
@@ -686,6 +695,16 @@ async def run_btc_scanner(bot, chat_id: int):
                         )
                         await bot.send_message(chat_id=chat_id, text=trade_msg)
                         print(f"BTC trade placed: {trade}")
+                        # Register deal→signal mapping for self-learning
+                        register_trade_signal(
+                            deal_id         = trade["deal_id"],
+                            signal_id       = signal_id,
+                            ticker          = "BTC-USD",
+                            rsi             = signal.get("rsi", 0),
+                            trend_direction = signal.get("trading_verdict", ""),
+                            confluences     = signal.get("confluences", []),
+                            session         = signal.get("session_context", ""),
+                        )
                     else:
                         print(f"BTC trade blocked: {trade_result.get('reason', '?')}")
             else:

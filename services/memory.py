@@ -95,6 +95,33 @@ async def init_db():
                 cancelled_at   TIMESTAMP
             )
         """)
+        # ── Extend outcomes table for self-learning ────────────────────────
+        await conn.execute(
+            "ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS rsi_at_entry FLOAT"
+        )
+        await conn.execute(
+            "ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS trend_direction VARCHAR(20)"
+        )
+        await conn.execute(
+            "ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS confluences TEXT"
+        )
+        # ── Pattern insights (written after every 5 new outcomes) ──────────
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS trade_insights (
+                id              SERIAL PRIMARY KEY,
+                ticker          VARCHAR(20),
+                trades_analysed INTEGER,
+                overall_wr      FLOAT,
+                session_wr      TEXT,
+                confluence_wr   TEXT,
+                rsi_bucket_wr   TEXT,
+                top_setups      TEXT,
+                losing_patterns TEXT,
+                threshold_gold  INTEGER,
+                threshold_btc   INTEGER,
+                created_at      TIMESTAMP DEFAULT NOW()
+            )
+        """)
     print("Database initialized")
 
 async def save_signal(signal: dict) -> int:
@@ -132,16 +159,19 @@ async def save_signal(signal: dict) -> int:
         print(f"Save signal error: {e}")
         return 0
 
-async def save_outcome(signal_id: int, outcome: dict):
+async def save_outcome(signal_id: int, outcome: dict) -> int:
+    """Save a trade outcome. Returns the new row id."""
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
-            await conn.execute("""
+            row = await conn.fetchrow("""
                 INSERT INTO outcomes (
                     signal_id, ticker, action, entry_price,
                     exit_price, stop_loss, take_profit,
-                    result, pnl_pct, hold_minutes, session, notes
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                    result, pnl_pct, hold_minutes, session, notes,
+                    rsi_at_entry, trend_direction, confluences
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                RETURNING id
             """,
                 signal_id,
                 outcome.get("ticker", "GOLD"),
@@ -154,10 +184,15 @@ async def save_outcome(signal_id: int, outcome: dict):
                 float(outcome.get("pnl_pct", 0)),
                 int(outcome.get("hold_minutes", 0)),
                 outcome.get("session", "unknown"),
-                outcome.get("notes", "")
+                outcome.get("notes", ""),
+                float(outcome["rsi_at_entry"]) if outcome.get("rsi_at_entry") else None,
+                outcome.get("trend_direction"),
+                json.dumps(outcome["confluences"]) if outcome.get("confluences") else None,
             )
+            return row["id"] if row else 0
     except Exception as e:
         print(f"Save outcome error: {e}")
+        return 0
 
 async def save_position_update(update: dict):
     try:
@@ -304,6 +339,103 @@ async def get_pending_limit_orders() -> list:
             return result
     except Exception as e:
         print(f"Get pending limit orders error: {e}")
+        return []
+
+
+async def save_trade_insight(insight: dict) -> int:
+    """Persist a pattern-analysis snapshot to trade_insights."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO trade_insights (
+                    ticker, trades_analysed, overall_wr,
+                    session_wr, confluence_wr, rsi_bucket_wr,
+                    top_setups, losing_patterns,
+                    threshold_gold, threshold_btc
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                RETURNING id
+            """,
+                insight.get("ticker", "ALL"),
+                int(insight.get("trades_analysed", 0)),
+                float(insight.get("overall_wr", 0)),
+                json.dumps(insight.get("session_wr", {})),
+                json.dumps(insight.get("confluence_wr", {})),
+                json.dumps(insight.get("rsi_bucket_wr", {})),
+                json.dumps(insight.get("top_setups", [])),
+                json.dumps(insight.get("losing_patterns", [])),
+                int(insight.get("threshold_gold", 60)),
+                int(insight.get("threshold_btc", 58)),
+            )
+            return row["id"] if row else 0
+    except Exception as e:
+        print(f"Save trade insight error: {e}")
+        return 0
+
+
+async def get_latest_insight(ticker: str = "ALL") -> dict | None:
+    """Return the most recent trade_insights row for this ticker."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT * FROM trade_insights
+                WHERE ticker = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, ticker)
+            if not row:
+                return None
+            d = dict(row)
+            # Deserialise JSON fields
+            for field in ("session_wr", "confluence_wr", "rsi_bucket_wr",
+                          "top_setups", "losing_patterns"):
+                raw = d.get(field)
+                if raw:
+                    try:
+                        d[field] = json.loads(raw)
+                    except Exception:
+                        d[field] = {} if field.endswith("_wr") else []
+            return d
+    except Exception as e:
+        print(f"Get latest insight error: {e}")
+        return None
+
+
+async def get_outcomes_for_analysis(ticker: str, limit: int = 20,
+                                     days: int = None) -> list:
+    """
+    Last `limit` outcomes for `ticker`, joined with signal metadata.
+    If `days` is set, restricts to outcomes within the last N days.
+    """
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            date_filter = ""
+            params = [ticker, limit]
+            if days:
+                date_filter = "AND o.created_at >= NOW() - INTERVAL '1 day' * $3"
+                params.append(days)
+
+            rows = await conn.fetch(f"""
+                SELECT
+                    o.id, o.ticker, o.action, o.entry_price, o.exit_price,
+                    o.pnl_pct, o.result, o.session, o.hold_minutes,
+                    o.created_at, o.rsi_at_entry, o.trend_direction,
+                    COALESCE(o.confluences, s.confluences) AS confluences,
+                    s.market_structure, s.fvg_present,
+                    s.bos_detected, s.choch_detected
+                FROM outcomes o
+                LEFT JOIN signals s ON o.signal_id = s.id
+                WHERE o.ticker = $1
+                  AND o.result IS NOT NULL
+                  {date_filter}
+                ORDER BY o.created_at DESC
+                LIMIT $2
+            """, *params)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"Get outcomes for analysis error: {e}")
         return []
 
 

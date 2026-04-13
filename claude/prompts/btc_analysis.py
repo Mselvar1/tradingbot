@@ -155,6 +155,8 @@ Step 8: Assign confidence score (penalise: counter-5m-trend -15, dead zone -20, 
 
 Minimum confidence to trade: 58. If below, verdict must be WAIT or DO NOT TRADE.
 
+{learned_patterns}
+
 Return exactly this JSON structure:
 {{
   "setup_type": "momentum|mean_reversion|liquidity_sweep|fvg_fill|breakout",
