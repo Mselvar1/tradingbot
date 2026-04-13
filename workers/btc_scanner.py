@@ -10,6 +10,7 @@ from services.execution.capital_executor import executor
 from services.memory import save_signal, get_memory_context
 from claude.client import analyse_btc as analyse
 from claude.prompts.btc_analysis import BTC_ANALYSIS_PROMPT
+from services.rate_limiter import claude_limiter
 from config.settings import settings
 
 BTC_EPIC = "BTCUSD"         # used for /positions (order placement)
@@ -25,7 +26,7 @@ _BTC_EPIC_CANDIDATES = [
 ]
 _btc_candle_epic: str | None = None
 
-SCAN_INTERVAL = 60          # scan every 60 seconds
+SCAN_INTERVAL = 300         # scan every 5 minutes
 CONFIDENCE_THRESHOLD = 58   # minimum confidence to place a trade
 NOTIFY_THRESHOLD = 75       # minimum confidence to send analysis to Telegram
 STRONG_VERDICTS = {"STRONG BUY", "STRONG SELL"}   # always notify regardless of score
@@ -287,9 +288,13 @@ async def get_btc_data() -> dict:
         prev_close  = closes_1m[0]
         change_pct  = round((current - prev_close) / prev_close * 100, 3)
 
+        # 5-minute price change: current vs close 5 candles ago
+        p5m = closes_1m[-6] if len(closes_1m) >= 6 else closes_1m[0]
+        price_change_5m = round((current - p5m) / p5m * 100, 3) if p5m else 0.0
+
         return {
             "ticker": "BTC-USD", "price": current, "prev_close": prev_close,
-            "change_pct": change_pct,
+            "change_pct": change_pct, "price_change_5m": price_change_5m,
             # 1m
             "rsi": rsi_1m, "ema8": ema8, "ema21": ema21, "ema50": ema50,
             "ema_alignment": ema_alignment,
@@ -365,6 +370,19 @@ async def scan_btc(market_context: dict) -> dict | None:
 
     if not has_btc_setup(d):
         print("BTC: no setup — skipped")
+        return None
+
+    # Claude pre-filter: only analyse when conditions are actually extreme
+    rsi_extreme    = d["rsi"] < 35 or d["rsi"] > 65
+    price_moving   = abs(d.get("price_change_5m", 0)) > 0.5
+    if not (rsi_extreme or price_moving):
+        print(
+            f"BTC: pre-filter skipped "
+            f"(RSI={d['rsi']} change5m={d.get('price_change_5m', 0):+.3f}%)"
+        )
+        return None
+
+    if not await claude_limiter.acquire("BTC"):
         return None
 
     sentiment = await get_market_sentiment()

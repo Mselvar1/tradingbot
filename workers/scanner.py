@@ -9,6 +9,7 @@ from services.signal_history import history
 from services.execution.capital_executor import executor
 from services.memory import init_db, save_signal, get_memory_context
 from claude.client import analyse, review_signal
+from services.rate_limiter import claude_limiter
 from claude.prompts.analysis import ANALYSIS_PROMPT, REVIEW_PROMPT
 from config.settings import settings
 
@@ -147,6 +148,21 @@ async def scan_gold(market_context: dict):
 
     if not await has_scalp_setup(pd):
         print("Gold: no scalp setup — skipped")
+        return None
+
+    # Claude pre-filter: only analyse when RSI is extreme or ATR is elevated
+    rsi      = pd["rsi"]
+    atr_pct  = (pd["atr"] / pd["price"] * 100) if pd["price"] else 0
+    rsi_extreme = rsi < 38 or rsi > 62
+    atr_high    = atr_pct > 0.15
+    if not (rsi_extreme or atr_high):
+        print(
+            f"Gold: pre-filter skipped "
+            f"(RSI={rsi} ATR%={atr_pct:.3f}%)"
+        )
+        return None
+
+    if not await claude_limiter.acquire("GOLD"):
         return None
 
     sentiment = await get_market_sentiment()
