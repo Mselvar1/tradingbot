@@ -12,7 +12,19 @@ from claude.client import analyse
 from claude.prompts.btc_analysis import BTC_ANALYSIS_PROMPT
 from config.settings import settings
 
-BTC_EPIC = "BITCOIN"
+BTC_EPIC = "BITCOIN"        # used for /markets (price) and /positions (order placement)
+
+# Capital.com uses different epic formats for /markets vs /prices endpoints.
+# resolve_btc_epic() finds the working candle epic at startup and caches it.
+_BTC_EPIC_CANDIDATES = [
+    "BITCOIN",
+    "CS.D.BITCOIN.TODAY.IP",
+    "CS.D.BTCUSD.TODAY.IP",
+    "BTC",
+    "BTCUSD",
+]
+_btc_candle_epic: str | None = None
+
 SCAN_INTERVAL = 60          # scan every 60 seconds
 CONFIDENCE_THRESHOLD = 58   # lower = more signals
 MIN_SIGNAL_GAP = 600        # 10 minutes between signals (up to ~6/hour in active sessions)
@@ -132,14 +144,63 @@ def should_scan_btc() -> bool:
     return priority != "avoid"
 
 
+# ─── Epic Resolution ──────────────────────────────────────────────────────────
+
+async def resolve_btc_epic() -> str:
+    """Find the Capital.com epic that actually serves BTC candle data.
+
+    /markets/BITCOIN works (price snapshot) but /prices/BITCOIN returns 404 —
+    Capital.com uses a different epic format for crypto price history.
+    We try known candidates first, then fall back to a market search.
+    Result is cached for the lifetime of the process.
+    """
+    global _btc_candle_epic
+    if _btc_candle_epic:
+        return _btc_candle_epic
+
+    await capital_client.ensure_session()
+
+    # Try known candidates
+    for candidate in _BTC_EPIC_CANDIDATES:
+        test = await capital_client.get_ohlcv(candidate, "MINUTE", 5)
+        if test:
+            print(f"BTC: candle epic resolved → {candidate}")
+            _btc_candle_epic = candidate
+            return candidate
+
+    # Search Capital.com markets for a working bitcoin epic
+    print("BTC: searching Capital.com markets for Bitcoin epic...")
+    markets = await capital_client.search_market("bitcoin")
+    for m in markets:
+        epic = m.get("epic", "")
+        if not epic:
+            continue
+        test = await capital_client.get_ohlcv(epic, "MINUTE", 5)
+        if test:
+            print(f"BTC: candle epic found via search → {epic}")
+            _btc_candle_epic = epic
+            return epic
+
+    # Last resort — log all market results so we can see what's available
+    if markets:
+        found = [f"{m.get('epic')} ({m.get('instrumentName', '')})" for m in markets[:10]]
+        print(f"BTC: search returned markets but none had candle data: {found}")
+    else:
+        print("BTC: market search returned no results")
+
+    _btc_candle_epic = "BITCOIN"   # keep trying, log will show the error
+    return "BITCOIN"
+
+
 # ─── Data Fetching ────────────────────────────────────────────────────────────
 
 async def get_btc_data() -> dict:
     try:
         await capital_client.ensure_session()
-        price_data  = await capital_client.get_price(BTC_EPIC)
-        candles_1m  = await capital_client.get_ohlcv(BTC_EPIC, "MINUTE",   MAX_CANDLES_1M)
-        candles_5m  = await capital_client.get_ohlcv(BTC_EPIC, "MINUTE_5", MAX_CANDLES_5M)
+        candle_epic = await resolve_btc_epic()
+        price_data  = await capital_client.get_price(BTC_EPIC)          # /markets/ uses BITCOIN fine
+        candles_1m  = await capital_client.get_ohlcv(candle_epic, "MINUTE",   MAX_CANDLES_1M)
+        candles_5m  = await capital_client.get_ohlcv(candle_epic, "MINUTE_5", MAX_CANDLES_5M)
 
         if not candles_1m or price_data.get("price", 0) == 0:
             return {}

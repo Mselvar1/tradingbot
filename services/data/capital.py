@@ -190,6 +190,21 @@ class CapitalClient:
         except Exception as e:
             return {"status": "error", "reason": str(e)}
 
+    async def search_market(self, term: str) -> list:
+        """Search Capital.com markets by name to discover correct epic codes."""
+        try:
+            async with aiohttp.ClientSession() as s:
+                r = await s.get(
+                    f"{self.base_url}/markets",
+                    headers=self.get_headers(),
+                    params={"searchTerm": term}
+                )
+                d = await r.json()
+                return d.get("markets", [])
+        except Exception as e:
+            print(f"Capital market search error: {e}")
+            return []
+
     async def get_ohlcv(self, epic: str, resolution: str = "MINUTE",
                         max_candles: int = 150) -> list:
         """Returns list of {open, high, low, close, volume} dicts for full indicator calculation."""
