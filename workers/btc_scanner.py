@@ -26,7 +26,9 @@ _BTC_EPIC_CANDIDATES = [
 _btc_candle_epic: str | None = None
 
 SCAN_INTERVAL = 60          # scan every 60 seconds
-CONFIDENCE_THRESHOLD = 58   # lower = more signals
+CONFIDENCE_THRESHOLD = 58   # minimum confidence to place a trade
+NOTIFY_THRESHOLD = 75       # minimum confidence to send analysis to Telegram
+STRONG_VERDICTS = {"STRONG BUY", "STRONG SELL"}   # always notify regardless of score
 MIN_SIGNAL_GAP = 600        # 10 minutes between signals (up to ~6/hour in active sessions)
 MAX_CANDLES_1M = 150        # 1-minute candles for scalp indicators
 MAX_CANDLES_5M = 60         # 5-minute candles for higher-TF context
@@ -625,19 +627,27 @@ async def run_btc_scanner(bot, chat_id: int):
 
                 signal = await scan_btc(market_context)
                 if signal:
-                    msg = await format_btc_signal(signal)
-                    await bot.send_message(chat_id=chat_id, text=msg)
-                    if settings.public_channel_id:
-                        try:
-                            await bot.send_message(chat_id=settings.public_channel_id, text=msg)
-                        except Exception as e:
-                            print(f"BTC channel post failed: {e}")
-
                     history.save(signal)
                     signal_id = await save_signal(signal)
                     signal["db_id"] = signal_id
                     last_signal_time = now
-                    print(f"BTC signal sent (db_id: {signal_id})")
+
+                    # Only notify Telegram for strong signals — trades execute for all
+                    is_strong = (
+                        signal["confidence"] >= NOTIFY_THRESHOLD
+                        or signal.get("trading_verdict") in STRONG_VERDICTS
+                    )
+                    if is_strong:
+                        msg = await format_btc_signal(signal)
+                        await bot.send_message(chat_id=chat_id, text=msg)
+                        if settings.public_channel_id:
+                            try:
+                                await bot.send_message(chat_id=settings.public_channel_id, text=msg)
+                            except Exception as e:
+                                print(f"BTC channel post failed: {e}")
+                        print(f"BTC signal sent (confidence={signal['confidence']}, db_id={signal_id})")
+                    else:
+                        print(f"BTC signal quiet (confidence={signal['confidence']} < {NOTIFY_THRESHOLD}, db_id={signal_id})")
 
                     trade_result = await executor.place_trade(signal)
                     if trade_result["status"] == "success":
@@ -645,6 +655,7 @@ async def run_btc_scanner(bot, chat_id: int):
                         trade_msg = (
                             f"BTC TRADE PLACED\n"
                             f"BTC-USD {signal['action'].upper()}\n"
+                            f"Confidence: {signal['confidence']}/100\n"
                             f"Size: {trade['size']} units\n"
                             f"Entry: {_p(trade['entry_price'])}\n"
                             f"Stop:  {_p(trade['stop_loss'])}\n"
