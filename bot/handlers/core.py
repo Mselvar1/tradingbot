@@ -13,12 +13,23 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await auth_check(update): return
     await update.message.reply_text(
-        "/analyze [ticker] - AI analysis\n"
-        "/news [topic]    - Headlines\n"
-        "/buy [ticker] [amount] - Paper buy\n"
-        "/sell [ticker]   - Paper sell\n"
-        "/positions       - Open positions\n"
-        "/balance         - Balance"
+        "EMERGENCY\n"
+        "/kill     — Stop all trading & close positions\n"
+        "/resume   — Restart trading\n"
+        "/risk     — Risk engine status\n\n"
+        "SIGNALS & ANALYSIS\n"
+        "/signals  — Recent signal history\n"
+        "/stats    — Signal performance\n"
+        "/analyze [ticker] — AI analysis\n"
+        "/news [topic]     — Headlines\n\n"
+        "ACCOUNT\n"
+        "/balance    — Account balance\n"
+        "/positions  — Open positions\n"
+        "/checkstops — Stop loss alerts\n\n"
+        "OTHER\n"
+        "/status   — Bot status\n"
+        "/watchlist — Manage watchlist\n"
+        "/outcome [id] [win/loss] [pnl] — Log result"
     )
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

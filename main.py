@@ -1,4 +1,5 @@
 import asyncio
+from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from bot.handlers.core import cmd_start, cmd_help, cmd_status
 from bot.handlers.analysis import cmd_analyze, cmd_news
@@ -11,6 +12,21 @@ from workers.scanner import run_scanner
 from config.settings import settings
 
 async def post_init(app):
+    await app.bot.set_my_commands([
+        BotCommand("kill",       "EMERGENCY — stop all trading & close positions"),
+        BotCommand("resume",     "Restart trading after kill switch"),
+        BotCommand("risk",       "Risk engine status"),
+        BotCommand("signals",    "Recent signal history"),
+        BotCommand("stats",      "Signal performance stats"),
+        BotCommand("balance",    "Account balance"),
+        BotCommand("positions",  "Open positions"),
+        BotCommand("checkstops", "Stop loss alerts"),
+        BotCommand("analyze",    "AI market analysis"),
+        BotCommand("news",       "Market headlines"),
+        BotCommand("watchlist",  "Manage watchlist"),
+        BotCommand("status",     "Bot status"),
+        BotCommand("help",       "All commands"),
+    ])
     chat_id = settings.allowed_ids[0]
     asyncio.create_task(run_scanner(app.bot, chat_id))
     print(f"Scanner started for chat_id: {chat_id}")

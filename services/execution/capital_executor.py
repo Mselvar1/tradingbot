@@ -1,5 +1,6 @@
 from services.data.capital import capital_client
 from services.data.capital_epics import get_epic
+from services.risk import risk
 from config.settings import settings
 from datetime import datetime
 
@@ -18,6 +19,8 @@ class CapitalExecutor:
         return await capital_client.get_account_balance()
 
     async def can_trade(self) -> dict:
+        if risk.kill_switch:
+            return {"allowed": False, "reason": "Kill switch is active. Trading halted."}
         if not settings.capital_api_key:
             return {"allowed": False, "reason": "No Capital.com API key"}
         account = await self.get_account()
