@@ -9,6 +9,7 @@ from bot.handlers.risk import cmd_risk, cmd_kill, cmd_resume, cmd_checkstops
 from bot.handlers.watchlist import cmd_watchlist
 from bot.handlers.history import cmd_signals, cmd_stats, cmd_outcome
 from workers.scanner import run_scanner
+from workers.btc_scanner import run_btc_scanner
 from config.settings import settings
 
 async def post_init(app):
@@ -29,7 +30,8 @@ async def post_init(app):
     ])
     chat_id = settings.allowed_ids[0]
     asyncio.create_task(run_scanner(app.bot, chat_id))
-    print(f"Scanner started for chat_id: {chat_id}")
+    asyncio.create_task(run_btc_scanner(app.bot, chat_id))
+    print(f"Gold + BTC scanners started for chat_id: {chat_id}")
 
 def main():
     app = (

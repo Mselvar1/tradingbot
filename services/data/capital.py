@@ -178,6 +178,35 @@ class CapitalClient:
         except Exception as e:
             return {"status": "error", "reason": str(e)}
 
+    async def get_ohlcv(self, epic: str, resolution: str = "MINUTE",
+                        max_candles: int = 150) -> list:
+        """Returns list of {open, high, low, close, volume} dicts for full indicator calculation."""
+        try:
+            async with aiohttp.ClientSession() as s:
+                r = await s.get(
+                    f"{self.base_url}/prices/{epic}",
+                    headers=self.get_headers(),
+                    params={"resolution": resolution, "max": max_candles}
+                )
+                d = await r.json()
+                candles = []
+                for p in d.get("prices", []):
+                    def _mid(key):
+                        px = p.get(key, {})
+                        b, a = px.get("bid", 0), px.get("ask", 0)
+                        return (b + a) / 2 if b and a else (b or a)
+                    candles.append({
+                        "open":   _mid("openPrice"),
+                        "high":   _mid("highPrice"),
+                        "low":    _mid("lowPrice"),
+                        "close":  _mid("closePrice"),
+                        "volume": p.get("lastTradedVolume", 0)
+                    })
+                return candles
+        except Exception as e:
+            print(f"Capital OHLCV error: {e}")
+            return []
+
     async def close_position(self, deal_id: str) -> dict:
         try:
             async with aiohttp.ClientSession() as s:
