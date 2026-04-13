@@ -13,9 +13,11 @@ from workers.btc_scanner import run_btc_scanner
 from workers.position_monitor import run_position_monitor
 from workers.level_monitor import run_level_monitor
 from workers.weekly_report import run_weekly_report
+from services.memory import init_db
 from config.settings import settings
 
 async def post_init(app):
+    await init_db()
     await app.bot.set_my_commands([
         BotCommand("kill",       "EMERGENCY — stop all trading & close positions"),
         BotCommand("resume",     "Restart trading after kill switch"),

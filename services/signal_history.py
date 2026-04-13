@@ -6,20 +6,21 @@ class SignalHistory:
 
     def save(self, signal: dict):
         record = {
-            "id": len(self.signals) + 1,
-            "ticker": signal["ticker"],
-            "action": signal["action"],
-            "confidence": signal["confidence"],
-            "price_at_signal": signal["price"],
-            "entry": signal["entry"],
-            "stop_loss": signal["stop_loss"],
-            "tp1": signal["tp1"],
-            "tp2": signal["tp2"],
-            "rr": signal["rr"],
-            "timeframe": signal["timeframe"],
-            "summary": signal["summary"],
-            "sent_at": datetime.utcnow().isoformat(),
-            "outcome": "pending"
+            "id":             len(self.signals) + 1,
+            "ticker":         signal.get("ticker", ""),
+            "action":         signal.get("action", ""),
+            "confidence":     signal.get("confidence", 0),
+            "price_at_signal": signal.get("price", 0),
+            "entry":          signal.get("entry", []),
+            "stop_loss":      signal.get("stop_loss", 0),
+            "tp1":            signal.get("tp1", 0),
+            "tp2":            signal.get("tp2", 0),
+            "rr":             signal.get("rr", 0),
+            "timeframe":      signal.get("timeframe", ""),
+            # Gold uses "summary", BTC uses "analysis_summary"
+            "summary":        signal.get("summary") or signal.get("analysis_summary", ""),
+            "sent_at":        datetime.utcnow().isoformat(),
+            "outcome":        "pending"
         }
         self.signals.append(record)
         return record["id"]

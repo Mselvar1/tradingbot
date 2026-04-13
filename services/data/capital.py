@@ -344,11 +344,28 @@ class CapitalClient:
                         "response":       d
                     }
                 else:
-                    err = d.get("errorCode", d.get("error", "unknown"))
+                    err = str(d.get("errorCode", d.get("error", "unknown")))
                     print(
                         f"Limit order failed — {epic} {direction} "
                         f"@ {level} — {err}"
                     )
+                    # Demo accounts don't support working orders — fall back to market order
+                    if "not supported" in err.lower() or "method" in err.lower():
+                        print(
+                            f"Working orders unavailable ({err}) — "
+                            f"falling back to market order for {epic} {direction}"
+                        )
+                        fallback = await self.place_order(
+                            epic, direction, size, stop_loss, take_profit
+                        )
+                        if fallback.get("status") == "success":
+                            return {
+                                "status":           "success",
+                                "deal_reference":   fallback.get("deal_id"),
+                                "response":         fallback.get("response", {}),
+                                "fallback_to_market": True,
+                            }
+                        return fallback
                     return {"status": "error", "reason": err, "response": d}
         except Exception as e:
             return {"status": "error", "reason": str(e)}
