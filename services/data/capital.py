@@ -1,3 +1,4 @@
+import asyncio
 import aiohttp
 from config.settings import settings
 
@@ -14,6 +15,17 @@ class CapitalClient:
         )
         self.session_token = None
         self.account_token = None
+        self._session_lock = None   # lazy-init inside event loop
+
+    async def ensure_session(self):
+        """Safe session check — only one create_session() runs at a time."""
+        if self.session_token:
+            return
+        if self._session_lock is None:
+            self._session_lock = asyncio.Lock()
+        async with self._session_lock:
+            if not self.session_token:   # re-check after acquiring lock
+                await self.create_session()
 
     async def create_session(self) -> bool:
         if not settings.capital_email or not settings.capital_password:
@@ -189,10 +201,15 @@ class CapitalClient:
                     params={"resolution": resolution, "max": max_candles}
                 )
                 d = await r.json()
+                prices = d.get("prices", [])
+                if not prices:
+                    err = d.get("errorCode", d.get("error", "unknown"))
+                    print(f"Capital OHLCV empty — epic={epic} status={r.status} err={err}")
+                    return []
                 candles = []
-                for p in d.get("prices", []):
-                    def _mid(key):
-                        px = p.get(key, {})
+                for p in prices:
+                    def _mid(key, _p=p):
+                        px = _p.get(key, {})
                         b, a = px.get("bid", 0), px.get("ask", 0)
                         return (b + a) / 2 if b and a else (b or a)
                     candles.append({
@@ -204,7 +221,7 @@ class CapitalClient:
                     })
                 return candles
         except Exception as e:
-            print(f"Capital OHLCV error: {e}")
+            print(f"Capital OHLCV error — epic={epic}: {e}")
             return []
 
     async def close_position(self, deal_id: str) -> dict:

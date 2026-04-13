@@ -51,8 +51,7 @@ def get_session_name() -> str:
 
 async def get_gold_data() -> dict:
     try:
-        if not capital_client.session_token:
-            await capital_client.create_session()
+        await capital_client.ensure_session()
         price_data = await capital_client.get_price(GOLD_EPIC)
         candles_1m = await capital_client.get_candles(GOLD_EPIC, "MINUTE", MAX_CANDLES)
         if not candles_1m or price_data["price"] == 0:

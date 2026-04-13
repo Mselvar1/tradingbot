@@ -136,14 +136,10 @@ def should_scan_btc() -> bool:
 
 async def get_btc_data() -> dict:
     try:
-        if not capital_client.session_token:
-            await capital_client.create_session()
-
-        price_data, candles_1m, candles_5m = await asyncio.gather(
-            capital_client.get_price(BTC_EPIC),
-            capital_client.get_ohlcv(BTC_EPIC, "MINUTE",   MAX_CANDLES_1M),
-            capital_client.get_ohlcv(BTC_EPIC, "MINUTE_5", MAX_CANDLES_5M),
-        )
+        await capital_client.ensure_session()
+        price_data  = await capital_client.get_price(BTC_EPIC)
+        candles_1m  = await capital_client.get_ohlcv(BTC_EPIC, "MINUTE",   MAX_CANDLES_1M)
+        candles_5m  = await capital_client.get_ohlcv(BTC_EPIC, "MINUTE_5", MAX_CANDLES_5M)
 
         if not candles_1m or price_data.get("price", 0) == 0:
             return {}
@@ -548,6 +544,8 @@ async def format_btc_signal(sig: dict) -> str:
 # ─── Main Loop ────────────────────────────────────────────────────────────────
 
 async def run_btc_scanner(bot, chat_id: int):
+    # Stagger startup so Gold scanner creates the Capital.com session first
+    await asyncio.sleep(10)
     print("BTC scalping scanner started (24/7 with dead-zone avoidance)...")
     last_signal_time = None
 

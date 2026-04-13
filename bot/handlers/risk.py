@@ -27,8 +27,7 @@ async def cmd_kill(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
-        if not capital_client.session_token:
-            await capital_client.create_session()
+        await capital_client.ensure_session()
         positions = await capital_client.get_positions()
         if not positions:
             await update.message.reply_text("No open positions found.")
@@ -63,8 +62,7 @@ async def cmd_resume(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     account_line = ""
     try:
-        if not capital_client.session_token:
-            await capital_client.create_session()
+        await capital_client.ensure_session()
         account = await capital_client.get_account_balance()
         balance = account.get("balance", 0)
         available = account.get("available", 0)
@@ -80,8 +78,7 @@ async def cmd_resume(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_checkstops(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await auth_check(update): return
     try:
-        if not capital_client.session_token:
-            await capital_client.create_session()
+        await capital_client.ensure_session()
         positions = await capital_client.get_positions()
     except Exception as e:
         await update.message.reply_text(f"Error fetching positions: {e}")
