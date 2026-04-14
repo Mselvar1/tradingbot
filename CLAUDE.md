@@ -19,7 +19,7 @@ pip install -r requirements.txt
 3. Run dashboard: `chmod +x scripts/run_dashboard.sh && ./scripts/run_dashboard.sh`
 4. Open **http://localhost:8080** in Chrome. Tables are created on first request via `init_db()` (same as the worker).
 
-Deployed on Railway as a worker process (`Procfile: worker: python main.py`), Python 3.11.9 (`runtime.txt`). No build step — Railway installs requirements and runs `main.py` directly.
+Deployed on Railway as a **Worker** service: root `Procfile` defines only `worker: python main.py` (no `web` line) so Railpack does not start the FastAPI dashboard instead of the bot. Python 3.11.9 (`runtime.txt`). No build step — Railway installs requirements and runs `main.py` directly.
 
 ## Environment variables (`.env`)
 
@@ -61,7 +61,7 @@ DASHBOARD_AUTH_TOKEN=          # optional Bearer token for POST /monte-carlo/run
 | Signal platform | `workers/signal_platform_scheduler.py` | 4h (strategies + validation + Telegram digest) |
 | Weekly report | `workers/weekly_report.py` | checks every 30 min |
 
-**Dashboard (separate process):** `Procfile` includes `web: uvicorn dashboard.app:app ...`. Deploy a **second** Railway service using the `web` process type (or run locally on port 8080). Same `DATABASE_URL` as the worker.
+**Dashboard (separate process):** `Procfile.dashboard` contains the `web:` uvicorn command. Deploy a **second** Railway **Web** service and set **Start Command** to that uvicorn line (same `DATABASE_URL` as the worker). Locally use `scripts/run_dashboard.sh` (port 8080).
 
 All tasks share a single Capital.com session via `capital_client` (singleton in `services/data/capital.py`). Session tokens are refreshed lazily via `ensure_session()`. The **Binance** task only calls Binance public REST endpoints (no key); it feeds live 1m volume and book imbalance into the BTC Haiku prompt.
 
