@@ -147,17 +147,12 @@ def get_btc_session() -> tuple[str, str]:
 
 def should_scan_btc() -> bool:
     """
-    BTC scans only during same high-quality windows as Gold:
-    - London open: 07:00-08:30 UTC
-    - NY open:     13:30-15:00 UTC
+    BTC trades 24/7. Only skip 02:00-05:00 UTC (lowest volume dead zone).
     """
     now = datetime.datetime.utcnow()
-    if now.weekday() >= 5:
-        return False
     t = now.hour * 60 + now.minute
-    london_open = 7 * 60 <= t < 8 * 60 + 30
-    ny_open     = 13 * 60 + 30 <= t < 15 * 60
-    return london_open or ny_open
+    dead_zone = 2 * 60 <= t < 5 * 60
+    return not dead_zone
 
 
 # ─── Epic Resolution ──────────────────────────────────────────────────────────
@@ -737,7 +732,7 @@ async def run_btc_scanner(bot, chat_id: int):
                     else:
                         print(f"BTC trade blocked: {trade_result.get('reason', '?')}")
             else:
-                print("BTC: dead zone (21:00-02:00 UTC) — sleeping")
+                print("BTC: dead zone (02:00-05:00 UTC) — sleeping")
 
             await asyncio.sleep(SCAN_INTERVAL)
         except Exception as e:
