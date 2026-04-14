@@ -12,6 +12,13 @@ python main.py
 pip install -r requirements.txt
 ```
 
+### Local Postgres + signal dashboard (Chrome)
+
+1. Start Postgres: `docker compose up -d` (see `docker-compose.yml`; DB on `localhost:5432`).
+2. Copy env: `cp .env.example .env` — set real secrets for the full bot; for **dashboard only** you still need dummy values for `TELEGRAM_TOKEN`, `ANTHROPIC_API_KEY`, `NEWSAPI_KEY` so `config.settings` loads.
+3. Run dashboard: `chmod +x scripts/run_dashboard.sh && ./scripts/run_dashboard.sh`
+4. Open **http://localhost:8080** in Chrome. Tables are created on first request via `init_db()` (same as the worker).
+
 Deployed on Railway as a worker process (`Procfile: worker: python main.py`), Python 3.11.9 (`runtime.txt`). No build step — Railway installs requirements and runs `main.py` directly.
 
 ## Environment variables (`.env`)

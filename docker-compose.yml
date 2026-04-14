@@ -1,0 +1,22 @@
+# Local Postgres for development / dashboard (Chrome at http://localhost:8080)
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tradingbot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tradingbot
+      POSTGRES_PASSWORD: tradingbot
+      POSTGRES_DB: tradingbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - tradingbot_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradingbot -d tradingbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  tradingbot_pgdata:
