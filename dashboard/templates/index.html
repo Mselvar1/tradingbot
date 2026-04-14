@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Overview — Signal Platform{% endblock %}
+{% block content %}
+<h1>Signal generator — live overview</h1>
+<p style="color:var(--muted);max-width:720px">
+  Multi-timeframe candles (M15–D1), four strategy engines, validation snapshots, and circuit breaker status.
+  Reference only — not investment advice.
+</p>
+
+<div class="grid" style="margin-top:1.25rem">
+  <div class="card">
+    <h2>Candles stored</h2>
+    <div class="metric">{{ candle_count }}</div>
+    <p style="color:var(--muted);font-size:.85rem;margin:.5rem 0 0">rows in <code>candles</code></p>
+  </div>
+  <div class="card">
+    <h2>Circuit breaker</h2>
+    {% if circuit.paused_active %}
+      <div class="metric bad">PAUSED</div>
+      <p style="font-size:.85rem">Until {{ circuit.paused_until }}<br/>Streak counter: {{ circuit.consecutive_sl }}</p>
+    {% else %}
+      <div class="metric good">ACTIVE</div>
+      <p style="font-size:.85rem">Streak: {{ circuit.consecutive_sl }} / {{ streak_limit }}</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>Latest validation</h2>
+    {% if last_job %}
+      <p><strong>{{ last_job.job_type }}</strong></p>
+      <p style="font-size:.75rem;color:var(--muted)">{{ last_job.created_at }}</p>
+    {% else %}
+      <p style="color:var(--muted)">No snapshots yet — wait for scheduler or run worker.</p>
+    {% endif %}
+  </div>
+</div>
+
+<h2 style="margin-top:2rem">Strategy scores (latest)</h2>
+<div class="grid">
+  {% for inst, rows in scores.items() %}
+  <div class="card">
+    <h2>{{ inst }}</h2>
+    {% if not rows %}
+      <p style="color:var(--muted)">No data</p>
+    {% else %}
+      <table>
+        <thead><tr><th>Strategy</th><th>Score</th><th>Dir</th></tr></thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r.strategy }}</td>
+            <td>{{ "%.0f"|format(r.score) }}</td>
+            <td>{{ r.direction }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

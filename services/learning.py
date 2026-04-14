@@ -136,6 +136,13 @@ async def record_closed_position(
 
     await save_outcome(signal_id, outcome)
 
+    try:
+        from services.signal_platform.circuit_breaker import on_trade_outcome
+
+        await on_trade_outcome(result, ticker)
+    except Exception as e:
+        print(f"Circuit breaker hook error: {e}")
+
     # Clean up memory
     _deal_signal_map.pop(deal_id, None)
 

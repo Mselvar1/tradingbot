@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Candles — Signal Platform{% endblock %}
+{% block content %}
+<h1>Recent candles</h1>
+<p style="color:var(--muted)">Last {{ rows|length }} rows for {{ instrument }} {{ timeframe }}</p>
+<table>
+  <thead>
+    <tr><th>Open time (UTC)</th><th>O</th><th>H</th><th>L</th><th>C</th><th>Vol</th><th>Src</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.open_time }}</td>
+      <td>{{ "%.2f"|format(r.open_price) }}</td>
+      <td>{{ "%.2f"|format(r.high_price) }}</td>
+      <td>{{ "%.2f"|format(r.low_price) }}</td>
+      <td>{{ "%.2f"|format(r.close_price) }}</td>
+      <td>{{ r.volume }}</td>
+      <td>{{ r.source }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

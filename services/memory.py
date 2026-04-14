@@ -123,6 +123,63 @@ async def init_db():
                 created_at      TIMESTAMP DEFAULT NOW()
             )
         """)
+        # ── Multi-timeframe candles (signal generator / validation) ─────────
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS candles (
+                id BIGSERIAL PRIMARY KEY,
+                instrument VARCHAR(32) NOT NULL,
+                timeframe VARCHAR(16) NOT NULL,
+                open_time TIMESTAMPTZ NOT NULL,
+                open_price DOUBLE PRECISION NOT NULL,
+                high_price DOUBLE PRECISION NOT NULL,
+                low_price DOUBLE PRECISION NOT NULL,
+                close_price DOUBLE PRECISION NOT NULL,
+                volume DOUBLE PRECISION DEFAULT 0,
+                source VARCHAR(24) NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (instrument, timeframe, open_time, source)
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_candles_inst_tf ON candles "
+            "(instrument, timeframe, open_time DESC)"
+        )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS strategy_scores (
+                id SERIAL PRIMARY KEY,
+                instrument VARCHAR(32) NOT NULL,
+                strategy VARCHAR(64) NOT NULL,
+                score DOUBLE PRECISION NOT NULL,
+                direction VARCHAR(12),
+                details JSONB,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_strategy_scores_inst "
+            "ON strategy_scores (instrument, strategy, created_at DESC)"
+        )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS validation_snapshots (
+                id SERIAL PRIMARY KEY,
+                job_type VARCHAR(48) NOT NULL,
+                instrument VARCHAR(32),
+                payload JSONB NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS circuit_breaker (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                consecutive_sl INTEGER NOT NULL DEFAULT 0,
+                paused_until TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            "INSERT INTO circuit_breaker (id, consecutive_sl) "
+            "SELECT 1, 0 WHERE NOT EXISTS (SELECT 1 FROM circuit_breaker WHERE id = 1)"
+        )
     print("Database initialized")
 
 async def save_signal(signal: dict) -> int:
@@ -413,6 +470,16 @@ async def get_outcomes_for_analysis(ticker: str, limit: int = 20,
     except Exception as e:
         print(f"Get outcomes for analysis error: {e}")
         return []
+
+
+async def count_all_candles() -> int:
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            n = await conn.fetchval("SELECT COUNT(*)::bigint FROM candles")
+        return int(n or 0)
+    except Exception:
+        return 0
 
 
 async def get_memory_context(ticker: str = "GOLD") -> str:

@@ -32,11 +32,15 @@ PAPER_MODE=true
 BINANCE_ENABLED=true           # optional: Binance public spot metrics for BTC (no API key)
 BINANCE_SKIP_LOW_VOLUME=false  # if true, skip BTC signals when Binance 1m vol << 20m avg
 MIN_BINANCE_VOLUME_RATIO=0.12  # used when BINANCE_SKIP_LOW_VOLUME=true
+SIGNAL_PLATFORM_ENABLED=true   # multi-TF candles, strategies, validation, circuit breaker
+CIRCUIT_BREAKER_SL_STREAK=8    # consecutive SL outcomes before pause
+CIRCUIT_BREAKER_PAUSE_HOURS=24 # pause duration for new entries (executor + scanners)
+DASHBOARD_AUTH_TOKEN=          # optional Bearer token for POST /monte-carlo/run
 ```
 
 ## Architecture overview
 
-`main.py` is the entry point. It builds the Telegram bot, awaits `init_db()` in `post_init`, then launches **8 concurrent asyncio tasks**:
+`main.py` is the entry point. It builds the Telegram bot, awaits `init_db()` in `post_init`, then launches **10 concurrent asyncio tasks**:
 
 | Task | File | Interval |
 |---|---|---|
@@ -46,9 +50,20 @@ MIN_BINANCE_VOLUME_RATIO=0.12  # used when BINANCE_SKIP_LOW_VOLUME=true
 | Trade manager | `workers/trade_manager.py` | 60s |
 | Price tracker | `services/price_tracker.py` | 30s |
 | Binance flow | `services/data/binance_market.py` | 30s |
+| Candle feed | `workers/candle_feed.py` | 900s (M15–D1 → `candles` table) |
+| Signal platform | `workers/signal_platform_scheduler.py` | 4h (strategies + validation + Telegram digest) |
 | Weekly report | `workers/weekly_report.py` | checks every 30 min |
 
+**Dashboard (separate process):** `Procfile` includes `web: uvicorn dashboard.app:app ...`. Deploy a **second** Railway service using the `web` process type (or run locally on port 8080). Same `DATABASE_URL` as the worker.
+
 All tasks share a single Capital.com session via `capital_client` (singleton in `services/data/capital.py`). Session tokens are refreshed lazily via `ensure_session()`. The **Binance** task only calls Binance public REST endpoints (no key); it feeds live 1m volume and book imbalance into the BTC Haiku prompt.
+
+### Signal platform (`services/signal_platform/`)
+
+- **`candles` table** — OHLCV for `GOLD` (Capital) and `BTC-USD` (Binance spot) across M15, H1, H4, D1.
+- **Four strategies** — `strategies_core.py`: liquidity sweep, trend continuation, breakout expansion, EMA momentum; scores written to `strategy_scores`.
+- **Validation** — `validation_engine.py`: simple momentum backtest proxy, walk-forward OOS flag, Monte Carlo shuffle on recent `outcomes`; snapshots in `validation_snapshots`.
+- **Circuit breaker** — `circuit_breaker.py`: after `CIRCUIT_BREAKER_SL_STREAK` consecutive SL outcomes, pauses **new** entries until `paused_until` (persisted in `circuit_breaker` table). Scanners and `capital_executor.can_trade()` respect `is_paused()`.
 
 ## Signal pipeline (Gold and BTC)
 

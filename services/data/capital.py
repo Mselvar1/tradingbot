@@ -320,12 +320,18 @@ class CapitalClient:
                         px = _p.get(key, {})
                         b, a = px.get("bid", 0), px.get("ask", 0)
                         return (b + a) / 2 if b and a else (b or a)
+                    snap = (
+                        p.get("snapshotTime")
+                        or p.get("openTimeUtc")
+                        or p.get("closeTimeUtc")
+                    )
                     candles.append({
                         "open":   _mid("openPrice"),
                         "high":   _mid("highPrice"),
                         "low":    _mid("lowPrice"),
                         "close":  _mid("closePrice"),
-                        "volume": p.get("lastTradedVolume", 0)
+                        "volume": p.get("lastTradedVolume", 0),
+                        "snapshot_time": snap,
                     })
                 return candles
         except Exception as e:

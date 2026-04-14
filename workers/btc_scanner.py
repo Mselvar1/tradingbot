@@ -421,6 +421,12 @@ async def scan_btc(market_context: dict) -> dict | None:
     if risk.kill_switch:
         return None
 
+    from services.signal_platform.circuit_breaker import is_paused
+
+    if await is_paused():
+        print("BTC: circuit breaker pause — skipped")
+        return None
+
     d = await get_btc_data()
     if not d or d.get("price", 0) == 0:
         print("BTC: no data — skipped")

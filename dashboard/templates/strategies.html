@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Strategies — Signal Platform{% endblock %}
+{% block content %}
+<h1>Strategy leaderboard</h1>
+<div class="grid">
+  {% for inst, rows in scores.items() %}
+  <div class="card">
+    <h2>{{ inst }}</h2>
+    {% if not rows %}<p style="color:var(--muted)">No scores</p>{% else %}
+    <table>
+      <thead><tr><th>#</th><th>Strategy</th><th>Score</th><th>Direction</th></tr></thead>
+      <tbody>
+        {% for r in rows|sort(attribute='score', reverse=true) %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ r.strategy }}</td>
+          <td>{{ "%.1f"|format(r.score) }}</td>
+          <td>{{ r.direction }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

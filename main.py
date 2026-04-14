@@ -13,6 +13,8 @@ from workers.btc_scanner import run_btc_scanner
 from workers.position_monitor import run_position_monitor
 from workers.trade_manager import run_trade_manager
 from workers.weekly_report import run_weekly_report
+from workers.candle_feed import run_candle_feed
+from workers.signal_platform_scheduler import run_signal_platform_scheduler
 from services.price_tracker import run_price_tracker
 from services.data.binance_market import run_binance_flow_loop
 from services.memory import init_db
@@ -42,8 +44,14 @@ async def post_init(app):
     asyncio.create_task(run_trade_manager(app.bot, chat_id))
     asyncio.create_task(run_price_tracker())
     asyncio.create_task(run_binance_flow_loop())
+    asyncio.create_task(run_candle_feed())
+    asyncio.create_task(run_signal_platform_scheduler(app.bot, chat_id))
     asyncio.create_task(run_weekly_report(app.bot, chat_id))
-    print(f"All workers started: scanners, position monitor, trade manager, price tracker, Binance flow, weekly report — chat_id: {chat_id}")
+    print(
+        "All workers started: scanners, position monitor, trade manager, price tracker, "
+        "Binance flow, candle feed, signal platform, weekly report — "
+        f"chat_id: {chat_id}"
+    )
 
 def main():
     app = (

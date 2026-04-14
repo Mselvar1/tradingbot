@@ -1,0 +1,70 @@
+:root {
+  --bg: #0a0e17;
+  --card: #121a2b;
+  --accent: #3d8bfd;
+  --green: #2ee59d;
+  --red: #ff5c5c;
+  --text: #e8ecf4;
+  --muted: #8b9bb4;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  background: radial-gradient(1200px 600px at 10% -10%, #1a2440 0%, var(--bg) 45%);
+  color: var(--text);
+  min-height: 100vh;
+}
+nav {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #223;
+  background: rgba(10,14,23,.85);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+nav a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+nav a:hover { color: #fff; }
+main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin-top: 0; letter-spacing: -0.02em; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.card {
+  background: var(--card);
+  border: 1px solid #2a3548;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 8px 32px rgba(0,0,0,.35);
+}
+.card h2 { margin: 0 0 .5rem; font-size: .95rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.metric { font-size: 1.75rem; font-weight: 700; }
+.metric.good { color: var(--green); }
+.metric.bad { color: var(--red); }
+table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+th, td { padding: .5rem .4rem; text-align: left; border-bottom: 1px solid #2a3548; }
+th { color: var(--muted); font-weight: 600; }
+.btn {
+  display: inline-block;
+  padding: .55rem 1rem;
+  background: linear-gradient(135deg, #3d8bfd, #7c5cff);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  font-size: .9rem;
+}
+.btn:hover { filter: brightness(1.08); }
+.flash { padding: .75rem 1rem; border-radius: 8px; margin-bottom: 1rem; background: #1a2a40; border: 1px solid #3d8bfd; }
+pre.json { background: #0d121c; padding: 1rem; border-radius: 8px; overflow: auto; font-size: .75rem; border: 1px solid #223; }

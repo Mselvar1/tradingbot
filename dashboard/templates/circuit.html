@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Circuit breaker{% endblock %}
+{% block content %}
+<h1>Circuit breaker</h1>
+<div class="card" style="max-width:560px">
+  <p><strong>Consecutive SL (current):</strong> {{ circuit.consecutive_sl }}</p>
+  <p><strong>Trip threshold:</strong> {{ streak_limit }} SL → {{ pause_hours }}h pause on new entries</p>
+  <p><strong>Paused until:</strong> {{ circuit.paused_until or "—" }}</p>
+  <p><strong>Updated:</strong> {{ circuit.updated_at or "—" }}</p>
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Monte Carlo — Signal Platform{% endblock %}
+{% block content %}
+<h1>Monte Carlo simulation</h1>
+<p style="color:var(--muted)">
+  Shuffles historical outcome PnL% to estimate how often random ordering beats your realized sum.
+  Uses last ~80 closed trades per ticker from <code>outcomes</code>.
+</p>
+
+<div class="card" style="max-width:520px;margin-top:1rem">
+  <h2>Run now</h2>
+  <form method="post" action="/monte-carlo/run">
+    <label>Ticker</label><br/>
+    <select name="ticker" style="margin:.5rem 0 1rem;width:100%;padding:.4rem;background:#0d121c;color:var(--text);border:1px solid #334">
+      <option value="BTC-USD">BTC-USD</option>
+      <option value="GOLD">GOLD</option>
+    </select>
+    <label>Iterations</label><br/>
+    <input type="number" name="iterations" value="400" min="100" max="5000" style="margin:.5rem 0 1rem;width:100%;padding:.4rem;background:#0d121c;color:var(--text);border:1px solid #334" />
+    <button type="submit" class="btn">Run Monte Carlo</button>
+  </form>
+</div>
+
+{% if result %}
+<div class="card" style="margin-top:1.5rem">
+  <h2>Result</h2>
+  <pre class="json">{{ result }}</pre>
+</div>
+{% endif %}
+{% endblock %}

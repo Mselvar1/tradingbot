@@ -38,3 +38,7 @@ typing_extensions==4.15.0
 tzlocal==5.3.1
 yarl==1.23.0
 asyncpg
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+jinja2==3.1.6
+python-multipart==0.0.20

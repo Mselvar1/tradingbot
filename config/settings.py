@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # If True, skip BTC signals when Binance 1m vol << 20m avg (dead tape)
     binance_skip_low_volume: bool = False
     min_binance_volume_ratio: float = 0.12
+    # Signal platform / validation / dashboard
+    signal_platform_enabled: bool = True
+    circuit_breaker_sl_streak: int = 8
+    circuit_breaker_pause_hours: int = 24
+    dashboard_auth_token: Optional[str] = None  # optional Bearer for /api/* and MC POST
 
     @property
     def allowed_ids(self):

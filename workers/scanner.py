@@ -166,6 +166,12 @@ async def scan_gold(market_context: dict):
     if risk.kill_switch:
         return None
 
+    from services.signal_platform.circuit_breaker import is_paused
+
+    if await is_paused():
+        print("Gold: circuit breaker pause — skipped")
+        return None
+
     if not is_trading_session():
         print(f"Gold: outside trading hours ({get_session_name()}) — skipped")
         return None

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Validation — Signal Platform{% endblock %}
+{% block content %}
+<h1>Validation snapshots</h1>
+<p style="color:var(--muted)">Backtest proxy, walk-forward, and Monte Carlo job outputs.</p>
+{% for s in snapshots %}
+<div class="card" style="margin-bottom:1rem">
+  <strong>{{ s.job_type }}</strong>
+  {% if s.instrument %}<span style="color:var(--muted)"> · {{ s.instrument }}</span>{% endif %}
+  <span style="color:var(--muted);font-size:.8rem"> · {{ s.created_at }}</span>
+  <pre class="json" style="margin-top:.75rem">{{ s.payload }}</pre>
+</div>
+{% endfor %}
+{% if not snapshots %}
+<p style="color:var(--muted)">No snapshots yet.</p>
+{% endif %}
+{% endblock %}

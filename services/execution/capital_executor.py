@@ -1,6 +1,7 @@
 from services.data.capital import capital_client
 from services.data.capital_epics import get_epic
 from services.risk import risk
+from services.signal_platform.circuit_breaker import is_paused
 from config.settings import settings
 from datetime import datetime
 
@@ -24,6 +25,11 @@ class CapitalExecutor:
     async def can_trade(self) -> dict:
         if risk.kill_switch:
             return {"allowed": False, "reason": "Kill switch is active. Trading halted."}
+        if await is_paused():
+            return {
+                "allowed": False,
+                "reason": "Circuit breaker: new entries paused (see signal dashboard).",
+            }
         if not settings.capital_api_key:
             return {"allowed": False, "reason": "No Capital.com API key"}
         account = await self.get_account()
