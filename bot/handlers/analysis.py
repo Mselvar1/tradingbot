@@ -42,12 +42,16 @@ async def cmd_analyze(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ma50=pd.get("ma50", 0),
         day_high=pd.get("day_high", 0),
         day_low=pd.get("day_low", 0),
+        prev_day_high=pd.get("prev_day_high", 0),
+        prev_day_low=pd.get("prev_day_low", 0),
         atr=pd.get("atr", 0),
         volume_ratio=pd.get("volume_ratio", 1),
         support=pd.get("support", 0),
         resistance=pd.get("resistance", 0),
         sentiment=market_context.get("summary", "No sentiment data."),
-        news=combined_news
+        price_narrative="",
+        news=combined_news,
+        learned_patterns="",
     )
     r = await analyse(prompt)
     if "error" in r:

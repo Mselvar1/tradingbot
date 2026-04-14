@@ -18,6 +18,8 @@ MA20: {ma20}
 MA50: {ma50}
 Day high: {day_high}
 Day low: {day_low}
+Previous day high: {prev_day_high}
+Previous day low: {prev_day_low}
 ATR: {atr}
 Volume ratio vs average: {volume_ratio}x
 Intraday support: {support}

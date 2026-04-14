@@ -49,6 +49,26 @@ def get_session_name() -> str:
         return "OFF HOURS"
 
 
+def is_session_choppy_window() -> bool:
+    """
+    Skip first minutes of each UTC hour (0–5) and the last 15 minutes
+    of each Gold session window (London / NY).
+    """
+    now = datetime.datetime.utcnow()
+    if now.minute < 6:
+        return True
+    t = now.hour * 60 + now.minute
+    # London open 07:00–08:30 UTC — last 15m: 08:15–08:30
+    if 7 * 60 <= t < 8 * 60 + 30:
+        if t >= 8 * 60 + 15:
+            return True
+    # NY open 13:30–15:00 UTC — last 15m: 14:45–15:00
+    if 13 * 60 + 30 <= t < 15 * 60:
+        if t >= 14 * 60 + 45:
+            return True
+    return False
+
+
 async def get_gold_data() -> dict:
     try:
         await capital_client.ensure_session()
@@ -56,6 +76,16 @@ async def get_gold_data() -> dict:
         candles_1m = await capital_client.get_candles(GOLD_EPIC, "MINUTE", MAX_CANDLES)
         if not candles_1m or price_data["price"] == 0:
             return {}
+        bid = float(price_data.get("bid") or 0)
+        offer = float(price_data.get("offer") or 0)
+        spread = round(offer - bid, 3) if bid and offer else 0.0
+        daily = await capital_client.get_ohlcv(GOLD_EPIC, "DAY", 5)
+        prev_day_high = 0.0
+        prev_day_low = 0.0
+        if len(daily) >= 2:
+            prev = daily[-2]
+            prev_day_high = round(float(prev.get("high") or 0), 2)
+            prev_day_low = round(float(prev.get("low") or 0), 2)
         closes = candles_1m
         gains = [closes[i] - closes[i-1] for i in range(1, len(closes)) if closes[i] > closes[i-1]]
         losses = [closes[i-1] - closes[i] for i in range(1, len(closes)) if closes[i] < closes[i-1]]
@@ -98,6 +128,9 @@ async def get_gold_data() -> dict:
             "session_high": session_high,
             "session_low": session_low,
             "fvg_zones": fvg_zones[:3],
+            "spread": spread,
+            "prev_day_high": prev_day_high,
+            "prev_day_low": prev_day_low,
             "source": "capital.com"
         }
     except Exception as e:
@@ -137,9 +170,17 @@ async def scan_gold(market_context: dict):
         print(f"Gold: outside trading hours ({get_session_name()}) — skipped")
         return None
 
+    if is_session_choppy_window():
+        print("Gold: session edge / first 6 UTC minutes — skipped")
+        return None
+
     pd = await get_gold_data()
     if not pd or pd.get("price", 0) == 0:
         print("Gold: no data — skipped")
+        return None
+
+    if pd.get("spread", 0) > 0.8:
+        print(f"Gold: spread {pd['spread']} > 0.8 — skipped")
         return None
 
     session = get_session_name()
@@ -205,6 +246,8 @@ async def scan_gold(market_context: dict):
         f"SMC DATA:\n{fvg_text}\n"
         f"Session high: {pd.get('session_high', 0)}\n"
         f"Session low: {pd.get('session_low', 0)}\n"
+        f"Previous day high: {pd.get('prev_day_high', 0)}\n"
+        f"Previous day low: {pd.get('prev_day_low', 0)}\n"
         f"Current session: {session}"
     )
 
@@ -220,6 +263,8 @@ async def scan_gold(market_context: dict):
         ma50=pd["ma50"],
         day_high=pd["day_high"],
         day_low=pd["day_low"],
+        prev_day_high=pd.get("prev_day_high", 0),
+        prev_day_low=pd.get("prev_day_low", 0),
         atr=pd["atr"],
         volume_ratio=pd["volume_ratio"],
         support=pd["support"],
@@ -251,15 +296,15 @@ async def scan_gold(market_context: dict):
         action = "buy" if trend == "bullish" else "sell"
         print(f"Gold: forced action to {action} based on trend ({trend})")
 
-    # MA trend filter: only trade with the trend
+    # MA regime: only BUY when MA20 > MA50; otherwise only SELL
     ma20 = pd.get("ma20", 0)
     ma50 = pd.get("ma50", 0)
     if ma20 and ma50:
-        if action == "buy" and ma20 <= ma50:
-            print(f"Gold: BUY rejected — MA20 ({ma20}) <= MA50 ({ma50}), no uptrend")
+        if ma20 > ma50 and action != "buy":
+            print(f"Gold: only longs when MA20 ({ma20}) > MA50 ({ma50}) — got {action}, skipped")
             return None
-        if action == "sell" and ma20 >= ma50:
-            print(f"Gold: SELL rejected — MA20 ({ma20}) >= MA50 ({ma50}), no downtrend")
+        if ma20 <= ma50 and action != "sell":
+            print(f"Gold: only shorts when MA20 ({ma20}) <= MA50 ({ma50}) — got {action}, skipped")
             return None
 
     # Minimum 2 SMC confluences required

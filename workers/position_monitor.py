@@ -27,6 +27,7 @@ from services.learning import record_closed_position
 from services.trade_store import trade_store
 
 MONITOR_INTERVAL = 120    # seconds between checks
+MAX_HOLD_MIN_WITHOUT_TP1 = 90  # close at market if open this long without reaching TP1
 
 # Per-deal state: tracks breakeven status and original levels
 # { deal_id: { breakeven_done, original_stop, original_entry, tp1,
@@ -147,6 +148,18 @@ def _next_stop(pos: dict, state: dict) -> tuple[float | None, str | None]:
                 return candidate, "trailing"
 
     return None, None
+
+
+def _reached_tp1(pos: dict, state: dict) -> bool:
+    """True if price has reached the first take-profit level (favourable side)."""
+    tp1 = _f(state.get("tp1"))
+    if not tp1:
+        return False
+    cur = _f(pos.get("current_price"))
+    direction = state.get("direction", "BUY")
+    if direction == "BUY":
+        return cur >= tp1 * 0.9995
+    return cur <= tp1 * 1.0005
 
 
 # ─── Telegram Message ─────────────────────────────────────────────────────────
@@ -304,6 +317,31 @@ async def run_position_monitor(bot, chat_id: int):
 
                 # Initialise state if first time seeing this deal
                 state = _states.get(deal_id) or _init_state(deal_id, pos)
+
+                elapsed_min = (time.time() - state.get("opened_at", time.time())) / 60.0
+                if elapsed_min > MAX_HOLD_MIN_WITHOUT_TP1 and not _reached_tp1(pos, state):
+                    print(
+                        f"Monitor: {MAX_HOLD_MIN_WITHOUT_TP1}m+ without TP1 — closing {deal_id}"
+                    )
+                    res = await capital_client.close_position(deal_id)
+                    if res.get("status") == "success":
+                        trade_store.remove(deal_id)
+                        ticker = pos.get("name") or pos.get("epic") or "?"
+                        try:
+                            await bot.send_message(
+                                chat_id=chat_id,
+                                text=(
+                                    f"───────────────────\n"
+                                    f"POSITION CLOSED (max hold)\n"
+                                    f"───────────────────\n"
+                                    f"{ticker} {state['direction']}\n"
+                                    f"Open ~{int(elapsed_min)} min without reaching TP1.\n"
+                                    f"───────────────────"
+                                ),
+                            )
+                        except Exception as e:
+                            print(f"Monitor: max-hold telegram failed — {e}")
+                    continue
 
                 new_stop, update_type = _next_stop(pos, state)
                 if new_stop is None:

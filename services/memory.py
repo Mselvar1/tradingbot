@@ -161,9 +161,15 @@ async def save_signal(signal: dict) -> int:
         return 0
 
 async def save_outcome(signal_id: int, outcome: dict) -> int:
-    """Save a trade outcome. Returns the new row id."""
+    """Save a trade outcome. Returns the new row id.
+    signal_id=0 or None means the trade was opened without a tracked signal
+    (e.g. manual trade or BTC position opened before DB was initialised) —
+    in that case we insert with a NULL signal_id to avoid FK violations.
+    """
     try:
         pool = await get_pool()
+        # Treat 0 the same as None — no valid FK target in signals table
+        safe_signal_id = signal_id if signal_id else None
         async with pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO outcomes (
@@ -174,7 +180,7 @@ async def save_outcome(signal_id: int, outcome: dict) -> int:
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
                 RETURNING id
             """,
-                signal_id,
+                safe_signal_id,
                 outcome.get("ticker", "GOLD"),
                 outcome.get("action", "buy"),
                 float(outcome.get("entry_price", 0)),
