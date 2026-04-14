@@ -322,6 +322,105 @@ async def get_win_rate(ticker: str = "GOLD") -> dict:
     except Exception as e:
         return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0}
 
+
+async def fetch_performance_dashboard(limit_recent: int = 50) -> dict:
+    """
+    Aggregates for dashboard / performance page — counts only, no prices or PnL.
+    Source: `outcomes` (closes recorded by the bot pipeline).
+    """
+    out: dict = {
+        "overall": {"total": 0, "wins": 0, "losses": 0, "other": 0, "win_rate": 0.0},
+        "by_ticker": [],
+        "signals_count": 0,
+        "recent": [],
+    }
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*)::int AS total,
+                    COUNT(*) FILTER (WHERE result IN ('tp1', 'tp2', 'tp3'))::int AS wins,
+                    COUNT(*) FILTER (WHERE result = 'sl')::int AS losses,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(result, '') NOT IN ('tp1', 'tp2', 'tp3', 'sl')
+                    )::int AS other
+                FROM outcomes
+                """
+            )
+            if row:
+                total = int(row["total"] or 0)
+                wins = int(row["wins"] or 0)
+                losses = int(row["losses"] or 0)
+                other = int(row["other"] or 0)
+                wr = round(wins / total * 100, 1) if total else 0.0
+                out["overall"] = {
+                    "total": total,
+                    "wins": wins,
+                    "losses": losses,
+                    "other": other,
+                    "win_rate": wr,
+                }
+
+            per = await conn.fetch(
+                """
+                SELECT ticker,
+                    COUNT(*)::int AS total,
+                    COUNT(*) FILTER (WHERE result IN ('tp1', 'tp2', 'tp3'))::int AS wins,
+                    COUNT(*) FILTER (WHERE result = 'sl')::int AS losses,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(result, '') NOT IN ('tp1', 'tp2', 'tp3', 'sl')
+                    )::int AS other
+                FROM outcomes
+                GROUP BY ticker
+                ORDER BY ticker NULLS LAST
+                """
+            )
+            for r in per:
+                t = int(r["total"] or 0)
+                w = int(r["wins"] or 0)
+                out["by_ticker"].append(
+                    {
+                        "ticker": r["ticker"] or "—",
+                        "total": t,
+                        "wins": w,
+                        "losses": int(r["losses"] or 0),
+                        "other": int(r["other"] or 0),
+                        "win_rate": round(w / t * 100, 1) if t else 0.0,
+                    }
+                )
+
+            out["signals_count"] = int(await conn.fetchval("SELECT COUNT(*)::int FROM signals") or 0)
+
+            lim = max(1, min(limit_recent, 200))
+            recent = await conn.fetch(
+                """
+                SELECT id, ticker, action, result, hold_minutes, session, created_at
+                FROM outcomes
+                ORDER BY created_at DESC
+                LIMIT $1
+                """,
+                lim,
+            )
+            for r in recent:
+                ca = r["created_at"]
+                out["recent"].append(
+                    {
+                        "id": r["id"],
+                        "ticker": r["ticker"],
+                        "action": r["action"],
+                        "result": r["result"],
+                        "hold_minutes": r["hold_minutes"],
+                        "session": r["session"],
+                        "created_at": ca.isoformat() if ca and hasattr(ca, "isoformat") else str(ca),
+                    }
+                )
+    except Exception as e:
+        print(f"fetch_performance_dashboard error: {e}")
+    return out
+
+
 async def save_trade_exit(exit_data: dict) -> int:
     """Save a managed trade exit to the trade_exits table."""
     try:

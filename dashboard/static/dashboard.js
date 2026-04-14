@@ -163,10 +163,142 @@
     lineChart("chartCandlesClose", series, "Close", rgb);
   }
 
+  function doughnutOutcome(canvasId, overall) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof Chart === "undefined") return;
+    const ctx = canvas.getContext("2d");
+    const w = overall?.wins || 0;
+    const l = overall?.losses || 0;
+    const o = overall?.other || 0;
+    const sum = w + l + o;
+    if (sum === 0) {
+      new Chart(ctx, {
+        type: "doughnut",
+        data: {
+          labels: ["No recorded closes yet"],
+          datasets: [{ data: [1], backgroundColor: ["#1f2937"], borderWidth: 0 }],
+        },
+        options: {
+          cutout: "62%",
+          plugins: { legend: { position: "bottom", labels: { color: muted, font: { family: font } } } },
+        },
+      });
+      return;
+    }
+    new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: ["TP wins", "Stop losses", "Other"],
+        datasets: [
+          {
+            data: [w, l, o],
+            backgroundColor: [
+              "rgba(52, 211, 153, 0.88)",
+              "rgba(248, 113, 113, 0.88)",
+              "rgba(148, 163, 184, 0.6)",
+            ],
+            borderColor: "#111827",
+            borderWidth: 2,
+            hoverOffset: 14,
+          },
+        ],
+      },
+      options: {
+        cutout: "62%",
+        animation: { animateRotate: true, duration: 1100, easing: "easeOutQuart" },
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { color: muted, padding: 14, font: { family: font, size: 11 } },
+          },
+          tooltip: baseOpts().plugins.tooltip,
+        },
+      },
+    });
+  }
+
+  function barOutcomesByTicker(canvasId, rows) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof Chart === "undefined") return;
+    const ctx = canvas.getContext("2d");
+    if (!rows || !rows.length) {
+      new Chart(ctx, {
+        type: "bar",
+        data: { labels: ["—"], datasets: [{ label: "No data", data: [0], backgroundColor: "#1f2937" }] },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: muted }, grid: { color: grid } },
+            y: { beginAtZero: true, ticks: { color: muted }, grid: { color: grid } },
+          },
+        },
+      });
+      return;
+    }
+    const labels = rows.map((r) => r.ticker || "—");
+    new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "TP wins",
+            data: rows.map((r) => r.wins || 0),
+            backgroundColor: "rgba(52, 211, 153, 0.85)",
+            borderRadius: 6,
+          },
+          {
+            label: "SL losses",
+            data: rows.map((r) => r.losses || 0),
+            backgroundColor: "rgba(248, 113, 113, 0.85)",
+            borderRadius: 6,
+          },
+          {
+            label: "Other",
+            data: rows.map((r) => r.other || 0),
+            backgroundColor: "rgba(148, 163, 184, 0.65)",
+            borderRadius: 6,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 900, easing: "easeOutQuart" },
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { color: muted, font: { family: font, size: 11 }, boxWidth: 12 },
+          },
+          tooltip: baseOpts().plugins.tooltip,
+        },
+        scales: {
+          x: {
+            ticks: { color: muted, font: { family: font, size: 11 } },
+            grid: { color: grid },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { color: muted, font: { family: font, size: 10 } },
+            grid: { color: grid },
+          },
+        },
+      },
+    });
+  }
+
+  function initPerformance() {
+    const perf = readJson("dash-json-performance");
+    if (!perf) return;
+    doughnutOutcome("chartOutcomePie", perf.overall);
+    barOutcomesByTicker("chartOutcomeByTicker", perf.by_ticker);
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     const page = document.body.dataset.dashPage;
     if (page === "index") initIndex();
     else if (page === "strategies") initStrategies();
     else if (page === "candles") initCandles();
+    else if (page === "performance") initPerformance();
   });
 })();

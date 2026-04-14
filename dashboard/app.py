@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 from config.settings import settings
-from services.memory import count_all_candles, init_db
+from services.memory import count_all_candles, fetch_performance_dashboard, init_db
 from services.signal_platform.circuit_breaker import get_state, is_paused
 from services.signal_platform.candles_store import fetch_candles_from_db
 from services.signal_platform.strategy_runner import latest_scores_summary
@@ -136,6 +136,31 @@ async def index(request: Request):
             "scores_chart_json": scores_chart_json,
         },
     )
+
+
+@app.get("/performance", response_class=HTMLResponse)
+async def performance_page(request: Request):
+    """Win/loss aggregates from Postgres `outcomes` — no Capital.com calls; no amounts."""
+    if not settings.database_url:
+        return HTMLResponse("<h1>DATABASE_URL not set</h1>", status_code=503)
+    perf = await fetch_performance_dashboard(50)
+    return templates.TemplateResponse(
+        "performance.html",
+        {
+            "request": request,
+            "perf": perf,
+            "perf_json": json.dumps(perf),
+        },
+    )
+
+
+@app.get("/api/performance/summary")
+async def api_performance_summary():
+    """JSON: closed-trade counts and win rate from `outcomes` (share-safe, no prices)."""
+    if not settings.database_url:
+        raise HTTPException(503, "DATABASE_URL not set")
+    perf = await fetch_performance_dashboard(50)
+    return JSONResponse(perf)
 
 
 @app.get("/api/chart/candles")

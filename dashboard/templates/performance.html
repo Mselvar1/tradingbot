@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Performance — Signal Platform{% endblock %}
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<script src="/static/dashboard.js" defer></script>
+{% endblock %}
+{% block body_attrs %}data-dash-page="performance"{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Bot performance</h1>
+  <p class="lede">Aggregated from your Postgres <code class="mono">outcomes</code> table (closes the bot detected). <strong>No prices, sizes, or P&amp;L</strong> — only counts, win rate, and result labels. Not fetched from Capital.com.</p>
+</div>
+
+<script type="application/json" id="dash-json-performance">{{ perf_json|safe }}</script>
+
+{% set o = perf.overall %}
+
+<div class="grid" style="margin-bottom:1rem">
+  <div class="card">
+    <h2>Recorded closes</h2>
+    <div class="metric">{{ o.total }}</div>
+    <p class="muted" style="margin:0.35rem 0 0">Rows in <code class="mono">outcomes</code></p>
+  </div>
+  <div class="card">
+    <h2>Win rate</h2>
+    <div class="metric" style="color:var(--green)">{{ o.win_rate }}%</div>
+    <p class="muted" style="margin:0.35rem 0 0">Wins = TP hits (tp1 / tp2 / tp3)</p>
+  </div>
+  <div class="card">
+    <h2>Wins · losses · other</h2>
+    <p style="margin:0;font-size:1.05rem"><span class="chip chip-long">{{ o.wins }} TP</span>
+      <span class="chip chip-short" style="margin-left:0.35rem">{{ o.losses }} SL</span>
+      <span class="chip" style="margin-left:0.35rem;background:rgba(148,163,184,0.2);color:var(--muted)">{{ o.other }} other</span></p>
+    <p class="muted" style="margin:0.5rem 0 0;font-size:0.8rem">“Other” = manual / early exit codes not classified as TP or SL.</p>
+  </div>
+  <div class="card">
+    <h2>Signals in DB</h2>
+    <div class="metric mono">{{ perf.signals_count }}</div>
+    <p class="muted" style="margin:0.35rem 0 0">All rows in <code class="mono">signals</code> (not only filled trades)</p>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-bottom:1.5rem">
+  <div class="card">
+    <div class="card-title-lg">Outcome mix (animated)</div>
+    <p class="muted" style="margin:0 0 0.5rem;font-size:0.85rem">Doughnut: TP wins vs stop vs other</p>
+    <div class="chart-wrap chart-wrap--tall"><canvas id="chartOutcomePie" aria-label="Win loss pie chart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-title-lg">By ticker</div>
+    <p class="muted" style="margin:0 0 0.5rem;font-size:0.85rem">Grouped bars — same definitions per market</p>
+    <div class="chart-wrap chart-wrap--tall"><canvas id="chartOutcomeByTicker" aria-label="Outcomes by ticker"></canvas></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Recent closes (redacted)</h2>
+  <p class="muted" style="margin-top:0">Last 50 — time (UTC), ticker, side, result, hold time, session. No prices.</p>
+  <div style="overflow-x:auto;margin-top:0.75rem">
+    <table>
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Ticker</th>
+          <th>Side</th>
+          <th>Result</th>
+          <th>Hold (min)</th>
+          <th>Session</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in perf.recent %}
+        <tr>
+          <td class="mono" style="font-size:0.78rem">{{ r.created_at }}</td>
+          <td>{{ r.ticker }}</td>
+          <td>{{ r.action }}</td>
+          <td>
+            {% if r.result and r.result[:2] == 'tp' %}
+            <span class="chip chip-long">{{ r.result }}</span>
+            {% elif r.result == 'sl' %}
+            <span class="chip chip-short">sl</span>
+            {% else %}
+            <span class="chip" style="background:rgba(148,163,184,0.2);color:var(--muted)">{{ r.result or '—' }}</span>
+            {% endif %}
+          </td>
+          <td class="mono">{{ r.hold_minutes }}</td>
+          <td class="muted" style="font-size:0.8rem">{{ r.session or '—' }}</td>
+        </tr>
+        {% endfor %}
+        {% if not perf.recent %}
+        <tr><td colspan="6" class="muted">No closes recorded yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p class="muted" style="margin-top:1.5rem;font-size:0.8rem">API (same payload): <a class="pill is-active" style="font-size:0.75rem;padding:0.25rem 0.55rem" href="/api/performance/summary" target="_blank" rel="noopener">GET /api/performance/summary</a></p>
+{% endblock %}
