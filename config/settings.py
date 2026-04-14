@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     capital_mode: str = "demo"
     capital_email: Optional[str] = None
     capital_password: Optional[str] = None
+    # Binance public spot API (no key) — BTC reference volume / book for scanner
+    binance_enabled: bool = True
+    binance_base_url: str = "https://api.binance.com"
+    binance_symbol: str = "BTCUSDT"
+    # If True, skip BTC signals when Binance 1m vol << 20m avg (dead tape)
+    binance_skip_low_volume: bool = False
+    min_binance_volume_ratio: float = 0.12
 
     @property
     def allowed_ids(self):

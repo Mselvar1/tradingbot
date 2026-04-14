@@ -30,6 +30,17 @@ Volume ratio:   {volume_ratio}x
 Volume trend:   {volume_trend}
 Session High:   {session_high}
 Session Low:    {session_low}
+Prev day high:  {prev_day_high}
+Prev day low:   {prev_day_low}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+BINANCE SPOT (reference liquidity — not your broker)
+━━━━━━━━━━━━━━━━━━━━━━━
+USDT mid:           {binance_price}
+1m volume (BTC):    {binance_vol_1m}
+Vol vs 20m avg:     {binance_vol_ratio}x
+Book imbalance:     {binance_book_imbalance} ({binance_book_label})
+Status:             {binance_status}
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 5-MINUTE CONTEXT (higher TF filter)
@@ -140,6 +151,8 @@ BTC BEHAVIOUR KNOWLEDGE — APPLY TO ANALYSIS
     - Volume ratio 1.2-2x = normal active market
     - Volume ratio < 0.8x = low conviction, avoid breakouts
     - Decreasing volume on approach to key level = likely sweep setup
+    - Binance spot: 1m volume vs 20m average shows tape activity; book imbalance >0 favours
+      bids (short-term buy pressure), <0 favours asks — use as confluence, not sole signal
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 ANALYSIS PROCESS

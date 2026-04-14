@@ -29,11 +29,14 @@ CAPITAL_MODE=demo              # demo | live
 ALLOWED_TELEGRAM_IDS=          # comma-separated chat IDs
 PUBLIC_CHANNEL_ID=             # optional Telegram channel for signal forwarding
 PAPER_MODE=true
+BINANCE_ENABLED=true           # optional: Binance public spot metrics for BTC (no API key)
+BINANCE_SKIP_LOW_VOLUME=false  # if true, skip BTC signals when Binance 1m vol << 20m avg
+MIN_BINANCE_VOLUME_RATIO=0.12  # used when BINANCE_SKIP_LOW_VOLUME=true
 ```
 
 ## Architecture overview
 
-`main.py` is the entry point. It builds the Telegram bot, awaits `init_db()` in `post_init`, then launches **7 concurrent asyncio tasks**:
+`main.py` is the entry point. It builds the Telegram bot, awaits `init_db()` in `post_init`, then launches **8 concurrent asyncio tasks**:
 
 | Task | File | Interval |
 |---|---|---|
@@ -42,9 +45,10 @@ PAPER_MODE=true
 | Position monitor | `workers/position_monitor.py` | 120s |
 | Trade manager | `workers/trade_manager.py` | 60s |
 | Price tracker | `services/price_tracker.py` | 30s |
+| Binance flow | `services/data/binance_market.py` | 30s |
 | Weekly report | `workers/weekly_report.py` | checks every 30 min |
 
-All tasks share a single Capital.com session via `capital_client` (singleton in `services/data/capital.py`). Session tokens are refreshed lazily via `ensure_session()`.
+All tasks share a single Capital.com session via `capital_client` (singleton in `services/data/capital.py`). Session tokens are refreshed lazily via `ensure_session()`. The **Binance** task only calls Binance public REST endpoints (no key); it feeds live 1m volume and book imbalance into the BTC Haiku prompt.
 
 ## Signal pipeline (Gold and BTC)
 

@@ -14,6 +14,7 @@ from services.rate_limiter import claude_limiter
 from services.learning import get_dynamic_threshold, get_prompt_injection, register_trade_signal
 from services.price_tracker import price_tracker
 from services.trade_store import trade_store
+from services.data.binance_market import binance_snapshot_for_scan
 from config.settings import settings
 
 BTC_EPIC = "BTCUSD"         # used for /positions (order placement)
@@ -36,6 +37,8 @@ STRONG_VERDICTS = {"STRONG BUY", "STRONG SELL"}   # always notify regardless of 
 MIN_SIGNAL_GAP = 600        # 10 minutes between signals
 MAX_CANDLES_1M = 150        # 1-minute candles for scalp indicators
 MAX_CANDLES_5M = 60         # 5-minute candles for higher-TF context
+# Skip trades when bid/offer spread (USD) is wider than this (Capital.com / CFD)
+MAX_BTC_SPREAD_USD = 120.0
 
 
 # ─── Technical Indicator Helpers ──────────────────────────────────────────────
@@ -155,6 +158,38 @@ def should_scan_btc() -> bool:
     return not dead_zone
 
 
+def is_btc_choppy_window() -> bool:
+    """
+    Skip first six minutes of each UTC hour (0–5) and the last 15 minutes
+    of each named session block (aligns with Gold scanner behaviour).
+    """
+    now = datetime.datetime.utcnow()
+    if now.minute < 6:
+        return True
+    t = now.hour * 60 + now.minute
+    # London open 08:00–10:00 UTC
+    if 8 * 60 + 45 <= t < 10 * 60:
+        return True
+    # London mid 10:00–13:30 UTC
+    if 13 * 60 + 15 <= t < 13 * 60 + 30:
+        return True
+    # NY open 13:30–17:00 UTC
+    if 16 * 60 + 45 <= t < 17 * 60:
+        return True
+    # NY mid 17:00–21:00 UTC
+    if 20 * 60 + 45 <= t < 21 * 60:
+        return True
+    # Asian 05:00–08:00 UTC (when not in 02:00–05:00 scan skip)
+    if 7 * 60 + 45 <= t < 8 * 60:
+        return True
+    # Dead zone 21:00–02:00 UTC — tail of session near midnight and before 02:00
+    if 23 * 60 + 45 <= t < 24 * 60:
+        return True
+    if 1 * 60 + 45 <= t < 2 * 60:
+        return True
+    return False
+
+
 # ─── Epic Resolution ──────────────────────────────────────────────────────────
 
 async def resolve_btc_epic() -> str:
@@ -212,9 +247,21 @@ async def get_btc_data() -> dict:
         price_data  = await capital_client.get_price(candle_epic)
         candles_1m  = await capital_client.get_ohlcv(candle_epic, "MINUTE",   MAX_CANDLES_1M)
         candles_5m  = await capital_client.get_ohlcv(candle_epic, "MINUTE_5", MAX_CANDLES_5M)
+        daily       = await capital_client.get_ohlcv(candle_epic, "DAY", 5)
 
         if not candles_1m or price_data.get("price", 0) == 0:
             return {}
+
+        bid = float(price_data.get("bid") or 0)
+        offer = float(price_data.get("offer") or 0)
+        spread_usd = round(offer - bid, 2) if bid and offer else 0.0
+
+        prev_day_high = 0.0
+        prev_day_low = 0.0
+        if len(daily) >= 2:
+            prev = daily[-2]
+            prev_day_high = round(float(prev.get("high") or 0), 2)
+            prev_day_low = round(float(prev.get("low") or 0), 2)
 
         c1 = candles_1m
         closes_1m = [c["close"] for c in c1]
@@ -300,6 +347,8 @@ async def get_btc_data() -> dict:
         p5m = closes_1m[-6] if len(closes_1m) >= 6 else closes_1m[0]
         price_change_5m = round((current - p5m) / p5m * 100, 3) if p5m else 0.0
 
+        bn = await binance_snapshot_for_scan()
+
         return {
             "ticker": "BTC-USD", "price": current, "prev_close": prev_close,
             "change_pct": change_pct, "price_change_5m": price_change_5m,
@@ -316,6 +365,10 @@ async def get_btc_data() -> dict:
             "trend_5m": trend_5m, "structure_5m": structure_5m,
             "day_high": price_data.get("high", session_high),
             "day_low":  price_data.get("low",  session_low),
+            "spread_usd": spread_usd,
+            "prev_day_high": prev_day_high,
+            "prev_day_low": prev_day_low,
+            "binance": bn,
         }
     except Exception as e:
         print(f"BTC data error: {e}")
@@ -355,6 +408,10 @@ def has_btc_setup(d: dict) -> bool:
     if liq.get("equal_highs") or liq.get("equal_lows"):
         score += 1
 
+    bn = d.get("binance") or {}
+    if bn.get("ok") and (bn.get("volume_ratio") or 0) > 1.25:
+        score += 1
+
     return score >= 2
 
 
@@ -369,7 +426,32 @@ async def scan_btc(market_context: dict) -> dict | None:
         print("BTC: no data — skipped")
         return None
 
+    if is_btc_choppy_window():
+        print("BTC: session edge / first 6 UTC minutes — skipped")
+        return None
+
+    spread = d.get("spread_usd") or 0
+    if spread and spread > MAX_BTC_SPREAD_USD:
+        print(f"BTC: spread ${spread:.2f} > ${MAX_BTC_SPREAD_USD} — skipped")
+        return None
+
     session, priority = get_btc_session()
+    if priority in ("low", "avoid"):
+        print(f"BTC: session priority {priority} — skipped")
+        return None
+
+    bn = d.get("binance") or {}
+    if (
+        settings.binance_skip_low_volume
+        and bn.get("ok")
+        and (bn.get("volume_ratio") or 0) < settings.min_binance_volume_ratio
+    ):
+        print(
+            f"BTC: Binance vol ratio {bn.get('volume_ratio')} "
+            f"< min {settings.min_binance_volume_ratio} — skipped"
+        )
+        return None
+
     print(
         f"BTC: ${d['price']:,.0f}  RSI={d['rsi']}  "
         f"EMA={d['ema_alignment']}  BB={d['bb_context']}  "
@@ -430,12 +512,36 @@ async def scan_btc(market_context: dict) -> dict | None:
     fear_greed     = market_context.get("fear_greed", {})
     live_narrative = price_tracker.get_narrative("BTC-USD")
 
+    pd_hi = d.get("prev_day_high") or 0
+    pd_lo = d.get("prev_day_low") or 0
     combined_news = (
         f"BTC NEWS:\n{news_text}\n\n"
         f"MACRO & GEOPOLITICAL:\n{geo_text}\n\n"
         f"MARKET REGIME: VIX {sentiment.get('vix', 0)} — {sentiment.get('regime', 'unknown')}\n\n"
-        f"HISTORICAL PERFORMANCE:\n{memory_context}"
+        f"HISTORICAL PERFORMANCE:\n{memory_context}\n\n"
+        f"Previous day high: ${pd_hi:,.2f}\n"
+        f"Previous day low: ${pd_lo:,.2f}"
     )
+
+    bn = d.get("binance") or {}
+    if bn.get("ok"):
+        binance_price = f"{bn['price_usdt']:,.2f}"
+        binance_vol_1m = f"{bn['volume_1m_btc']:.4f}"
+        binance_vol_ratio = f"{bn['volume_ratio']:.2f}"
+        binance_book_imbalance = f"{bn['book_imbalance']:+.3f}"
+        binance_book_label = bn.get("book_imbalance_label", "")
+        binance_status = "Binance spot (live)"
+    else:
+        binance_price = "n/a"
+        binance_vol_1m = "n/a"
+        binance_vol_ratio = "n/a"
+        binance_book_imbalance = "n/a"
+        binance_book_label = ""
+        if bn.get("disabled"):
+            binance_status = "disabled in settings"
+        else:
+            err = bn.get("error")
+            binance_status = f"unavailable ({err})" if err else "unavailable"
 
     prompt = BTC_ANALYSIS_PROMPT.format(
         ticker="BTC-USD (Bitcoin)",
@@ -458,6 +564,14 @@ async def scan_btc(market_context: dict) -> dict | None:
         volume_trend=d["volume_trend"],
         session_high=f"{d['session_high']:,.2f}",
         session_low=f"{d['session_low']:,.2f}",
+        prev_day_high=f"{pd_hi:,.2f}" if pd_hi else "n/a",
+        prev_day_low=f"{pd_lo:,.2f}" if pd_lo else "n/a",
+        binance_price=binance_price,
+        binance_vol_1m=binance_vol_1m,
+        binance_vol_ratio=binance_vol_ratio,
+        binance_book_imbalance=binance_book_imbalance,
+        binance_book_label=binance_book_label,
+        binance_status=binance_status,
         rsi_5m=d["rsi_5m"],
         ema21_5m=d["ema21_5m"],
         trend_5m=d["trend_5m"],
