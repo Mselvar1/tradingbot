@@ -141,11 +141,16 @@
     const btc = readJson("dash-json-chart-btc");
     const gold = readJson("dash-json-chart-gold");
     const scores = readJson("dash-json-scores-charts");
+    const perfHome = readJson("dash-json-performance-home");
     lineChart("chartCloseBtc", btc, "Close (M15)", [124, 92, 255]);
     lineChart("chartCloseGold", gold, "Close (M15)", [255, 193, 7]);
     if (scores) {
       barChartH("chartScoresGold", scores.GOLD || {}, "Score");
       barChartH("chartScoresBtc", scores["BTC-USD"] || {}, "Score");
+    }
+    if (perfHome) {
+      doughnutOutcome("chartHomeOutcomePie", perfHome.overall);
+      barOutcomesByTicker("chartHomeOutcomeByTicker", perfHome.by_ticker);
     }
   }
 

@@ -114,14 +114,16 @@ async def index(request: Request):
             **last_job,
             "payload": json.dumps(last_job["payload"])[:400],
         }
-    scores = await latest_scores_summary()
-    btc_rows, gold_rows = await asyncio.gather(
+    scores, btc_rows, gold_rows, perf = await asyncio.gather(
+        latest_scores_summary(),
         fetch_candles_from_db("BTC-USD", "M15", limit=120),
         fetch_candles_from_db("GOLD", "M15", limit=120),
+        fetch_performance_dashboard(8),
     )
     chart_btc_json = json.dumps(_series_for_chart(btc_rows))
     chart_gold_json = json.dumps(_series_for_chart(gold_rows))
     scores_chart_json = json.dumps(_scores_chart_payload(scores))
+    perf_json = json.dumps(perf)
     return templates.TemplateResponse(
         "index.html",
         {
@@ -134,6 +136,8 @@ async def index(request: Request):
             "chart_btc_json": chart_btc_json,
             "chart_gold_json": chart_gold_json,
             "scores_chart_json": scores_chart_json,
+            "perf": perf,
+            "perf_json": perf_json,
         },
     )
 
