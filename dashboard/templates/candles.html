@@ -1,24 +1,56 @@
 {% extends "base.html" %}
 {% block title %}Candles — Signal Platform{% endblock %}
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<script src="/static/dashboard.js" defer></script>
+{% endblock %}
+{% block body_attrs %}data-dash-page="candles" data-instrument="{{ instrument }}"{% endblock %}
 {% block content %}
-<h1>Recent candles</h1>
-<p style="color:var(--muted)">Last {{ rows|length }} rows for {{ instrument }} {{ timeframe }}</p>
-<table>
-  <thead>
-    <tr><th>Open time (UTC)</th><th>O</th><th>H</th><th>L</th><th>C</th><th>Vol</th><th>Src</th></tr>
-  </thead>
-  <tbody>
-    {% for r in rows %}
-    <tr>
-      <td>{{ r.open_time }}</td>
-      <td>{{ "%.2f"|format(r.open_price) }}</td>
-      <td>{{ "%.2f"|format(r.high_price) }}</td>
-      <td>{{ "%.2f"|format(r.low_price) }}</td>
-      <td>{{ "%.2f"|format(r.close_price) }}</td>
-      <td>{{ r.volume }}</td>
-      <td>{{ r.source }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="page-head">
+  <h1>OHLCV explorer</h1>
+  <p class="lede">Recent bars from the database — switch instrument and timeframe to compare curves.</p>
+</div>
+
+<script type="application/json" id="dash-json-candles-chart">{{ chart_json|safe }}</script>
+
+<div class="pill-row">
+  <span class="muted" style="align-self:center;margin-right:0.25rem">Instrument</span>
+  <a class="pill{% if instrument == 'BTC-USD' %} is-active{% endif %}" href="/candles?instrument=BTC-USD&tf={{ timeframe }}">BTC-USD</a>
+  <a class="pill{% if instrument == 'GOLD' %} is-active{% endif %}" href="/candles?instrument=GOLD&tf={{ timeframe }}">GOLD</a>
+  <span class="muted" style="align-self:center;margin-left:0.75rem;margin-right:0.25rem">TF</span>
+  <a class="pill{% if timeframe == 'M15' %} is-active{% endif %}" href="/candles?instrument={{ instrument }}&tf=M15">M15</a>
+  <a class="pill{% if timeframe == 'H1' %} is-active{% endif %}" href="/candles?instrument={{ instrument }}&tf=H1">H1</a>
+  <a class="pill{% if timeframe == 'H4' %} is-active{% endif %}" href="/candles?instrument={{ instrument }}&tf=H4">H4</a>
+  <a class="pill{% if timeframe == 'D1' %} is-active{% endif %}" href="/candles?instrument={{ instrument }}&tf=D1">D1</a>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+  <div class="card-title-lg">{{ instrument }} · {{ timeframe }} · close</div>
+  <p class="muted" style="margin:0 0 0.5rem;font-size:0.85rem">Last {{ rows|length }} bars · <a class="pill" style="padding:0.2rem 0.5rem;font-size:0.72rem" href="/api/chart/candles?instrument={{ instrument }}&tf={{ timeframe }}&limit=120" target="_blank" rel="noopener">JSON API</a></p>
+  <div class="chart-wrap chart-wrap--tall"><canvas id="chartCandlesClose" aria-label="Close price"></canvas></div>
+</div>
+
+<div class="card">
+  <h2>Raw rows</h2>
+  <div style="overflow-x:auto">
+    <table>
+      <thead>
+        <tr><th>Open time (UTC)</th><th>O</th><th>H</th><th>L</th><th>C</th><th>Vol</th><th>Src</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="mono">{{ r.open_time }}</td>
+          <td class="mono">{{ "%.2f"|format(r.open_price) }}</td>
+          <td class="mono">{{ "%.2f"|format(r.high_price) }}</td>
+          <td class="mono">{{ "%.2f"|format(r.low_price) }}</td>
+          <td class="mono">{{ "%.2f"|format(r.close_price) }}</td>
+          <td class="mono">{{ r.volume }}</td>
+          <td>{{ r.source }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% endblock %}

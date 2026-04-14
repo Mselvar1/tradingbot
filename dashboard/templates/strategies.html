@@ -1,27 +1,62 @@
 {% extends "base.html" %}
 {% block title %}Strategies — Signal Platform{% endblock %}
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<script src="/static/dashboard.js" defer></script>
+{% endblock %}
+{% block body_attrs %}data-dash-page="strategies"{% endblock %}
 {% block content %}
-<h1>Strategy leaderboard</h1>
-<div class="grid">
-  {% for inst, rows in scores.items() %}
+<div class="page-head">
+  <h1>Strategy leaderboard</h1>
+  <p class="lede">Ranked scores (0–100) and bias direction. Bars use green for long-leaning, red for short-leaning.</p>
+</div>
+
+<script type="application/json" id="dash-json-scores-charts">{{ scores_chart_json|safe }}</script>
+
+<div class="grid-2">
   <div class="card">
-    <h2>{{ inst }}</h2>
-    {% if not rows %}<p style="color:var(--muted)">No scores</p>{% else %}
-    <table>
+    <div class="card-title-lg">🪙 GOLD</div>
+    <div class="chart-wrap chart-wrap--tall"><canvas id="chartStratGold" aria-label="Gold strategies chart"></canvas></div>
+    {% if not scores.get('GOLD') %}
+    <p class="muted">No scores yet.</p>
+    {% else %}
+    <table style="margin-top:0.75rem">
       <thead><tr><th>#</th><th>Strategy</th><th>Score</th><th>Direction</th></tr></thead>
       <tbody>
-        {% for r in rows|sort(attribute='score', reverse=true) %}
+        {% for r in scores['GOLD']|sort(attribute='score', reverse=true) %}
+        {% set d = (r.direction or '')|lower %}
         <tr>
-          <td>{{ loop.index }}</td>
+          <td class="mono">{{ loop.index }}</td>
           <td>{{ r.strategy }}</td>
-          <td>{{ "%.1f"|format(r.score) }}</td>
-          <td>{{ r.direction }}</td>
+          <td class="mono">{{ "%.1f"|format(r.score) }}</td>
+          <td>{% if 'long' in d or 'buy' in d %}<span class="chip chip-long">Long</span>{% elif 'short' in d or 'sell' in d %}<span class="chip chip-short">Short</span>{% else %}{{ r.direction }}{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     {% endif %}
   </div>
-  {% endfor %}
+  <div class="card">
+    <div class="card-title-lg">₿ BTC-USD</div>
+    <div class="chart-wrap chart-wrap--tall"><canvas id="chartStratBtc" aria-label="BTC strategies chart"></canvas></div>
+    {% if not scores.get('BTC-USD') %}
+    <p class="muted">No scores yet.</p>
+    {% else %}
+    <table style="margin-top:0.75rem">
+      <thead><tr><th>#</th><th>Strategy</th><th>Score</th><th>Direction</th></tr></thead>
+      <tbody>
+        {% for r in scores['BTC-USD']|sort(attribute='score', reverse=true) %}
+        {% set d = (r.direction or '')|lower %}
+        <tr>
+          <td class="mono">{{ loop.index }}</td>
+          <td>{{ r.strategy }}</td>
+          <td class="mono">{{ "%.1f"|format(r.score) }}</td>
+          <td>{% if 'long' in d or 'buy' in d %}<span class="chip chip-long">Long</span>{% elif 'short' in d or 'sell' in d %}<span class="chip chip-short">Short</span>{% else %}{{ r.direction }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}

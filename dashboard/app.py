@@ -10,12 +10,13 @@ Railway: add a second service with start command:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
@@ -63,6 +64,36 @@ def _fmt_ts(x) -> str:
     return str(x)
 
 
+def _series_for_chart(rows: list) -> dict:
+    """Close-price series for Chart.js line charts."""
+    labels: list[str] = []
+    closes: list[float] = []
+    for r in rows:
+        ot = r.get("open_time")
+        if ot is not None and hasattr(ot, "strftime"):
+            labels.append(ot.strftime("%m/%d %H:%M"))
+        else:
+            labels.append(str(ot)[:14] if ot else "—")
+        closes.append(float(r["close_price"]))
+    return {"labels": labels, "closes": closes}
+
+
+def _scores_chart_payload(scores: dict) -> dict:
+    """Per-instrument bar chart data (sorted by score desc)."""
+    out: dict[str, dict] = {}
+    for inst, rows in scores.items():
+        if not rows:
+            out[inst] = {"labels": [], "scores": [], "directions": []}
+            continue
+        sorted_rows = sorted(rows, key=lambda x: float(x.get("score") or 0), reverse=True)
+        out[inst] = {
+            "labels": [str(r.get("strategy") or "") for r in sorted_rows],
+            "scores": [float(r.get("score") or 0) for r in sorted_rows],
+            "directions": [str(r.get("direction") or "").lower() for r in sorted_rows],
+        }
+    return out
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     if not settings.database_url:
@@ -84,6 +115,13 @@ async def index(request: Request):
             "payload": json.dumps(last_job["payload"])[:400],
         }
     scores = await latest_scores_summary()
+    btc_rows, gold_rows = await asyncio.gather(
+        fetch_candles_from_db("BTC-USD", "M15", limit=120),
+        fetch_candles_from_db("GOLD", "M15", limit=120),
+    )
+    chart_btc_json = json.dumps(_series_for_chart(btc_rows))
+    chart_gold_json = json.dumps(_series_for_chart(gold_rows))
+    scores_chart_json = json.dumps(_scores_chart_payload(scores))
     return templates.TemplateResponse(
         "index.html",
         {
@@ -93,15 +131,35 @@ async def index(request: Request):
             "last_job": last_job,
             "scores": scores,
             "streak_limit": getattr(settings, "circuit_breaker_sl_streak", 8),
+            "chart_btc_json": chart_btc_json,
+            "chart_gold_json": chart_gold_json,
+            "scores_chart_json": scores_chart_json,
         },
     )
+
+
+@app.get("/api/chart/candles")
+async def api_chart_candles(
+    instrument: str = "BTC-USD",
+    tf: str = "M15",
+    limit: int = 120,
+):
+    """JSON close series for charts (used by candles page fetch or external tools)."""
+    if not settings.database_url:
+        raise HTTPException(503, "DATABASE_URL not set")
+    if limit > 500:
+        limit = 500
+    rows = await fetch_candles_from_db(instrument, tf, limit=limit)
+    return JSONResponse(_series_for_chart(rows))
 
 
 @app.get("/strategies", response_class=HTMLResponse)
 async def strategies_page(request: Request):
     scores = await latest_scores_summary()
+    scores_chart_json = json.dumps(_scores_chart_payload(scores))
     return templates.TemplateResponse(
-        "strategies.html", {"request": request, "scores": scores}
+        "strategies.html",
+        {"request": request, "scores": scores, "scores_chart_json": scores_chart_json},
     )
 
 
@@ -148,6 +206,7 @@ async def candles_page(request: Request, instrument: str = "BTC-USD", tf: str = 
             r["open_time"] = r["open_time"].strftime("%Y-%m-%d %H:%M") if hasattr(
                 r["open_time"], "strftime"
             ) else str(r["open_time"])
+    chart_json = json.dumps(_series_for_chart(rows))
     return templates.TemplateResponse(
         "candles.html",
         {
@@ -155,6 +214,7 @@ async def candles_page(request: Request, instrument: str = "BTC-USD", tf: str = 
             "rows": rows,
             "instrument": instrument,
             "timeframe": tf,
+            "chart_json": chart_json,
         },
     )
 

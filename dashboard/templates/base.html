@@ -4,19 +4,35 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}Signal Platform{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
+  {% block extra_head %}{% endblock %}
 </head>
-<body>
-  <nav>
-    <a href="/">Overview</a>
-    <a href="/strategies">Strategies</a>
-    <a href="/validation">Validation</a>
-    <a href="/monte-carlo">Monte Carlo</a>
-    <a href="/candles">Candles</a>
-    <a href="/circuit">Circuit breaker</a>
-  </nav>
-  <main>
-    {% block content %}{% endblock %}
-  </main>
+<body {% block body_attrs %}{% endblock %}>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">◇</span>
+        <div>
+          <div class="brand-title">Signal Platform</div>
+          <div class="brand-sub">Research dashboard</div>
+        </div>
+      </div>
+      <nav class="side-nav">
+        <a href="/" class="side-nav__link{% if request.url.path == '/' %} is-active{% endif %}"><span class="ico" aria-hidden="true">📊</span> Overview</a>
+        <a href="/strategies" class="side-nav__link{% if request.url.path == '/strategies' %} is-active{% endif %}"><span class="ico" aria-hidden="true">🏆</span> Strategies</a>
+        <a href="/validation" class="side-nav__link{% if request.url.path == '/validation' %} is-active{% endif %}"><span class="ico" aria-hidden="true">🔬</span> Validation</a>
+        <a href="/monte-carlo" class="side-nav__link{% if request.url.path == '/monte-carlo' %} is-active{% endif %}"><span class="ico" aria-hidden="true">🎲</span> Monte Carlo</a>
+        <a href="/candles" class="side-nav__link{% if request.url.path == '/candles' %} is-active{% endif %}"><span class="ico" aria-hidden="true">📈</span> Candles</a>
+        <a href="/circuit" class="side-nav__link{% if request.url.path == '/circuit' %} is-active{% endif %}"><span class="ico" aria-hidden="true">⏹</span> Circuit</a>
+      </nav>
+      <p class="sidebar-foot">Read-only analytics. Not investment advice.</p>
+    </aside>
+    <div class="main-area">
+      <main class="content">{% block content %}{% endblock %}</main>
+    </div>
+  </div>
 </body>
 </html>

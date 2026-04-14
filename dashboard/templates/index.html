@@ -1,61 +1,96 @@
 {% extends "base.html" %}
 {% block title %}Overview — Signal Platform{% endblock %}
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<script src="/static/dashboard.js" defer></script>
+{% endblock %}
+{% block body_attrs %}data-dash-page="index"{% endblock %}
 {% block content %}
-<h1>Signal generator — live overview</h1>
-<p style="color:var(--muted);max-width:720px">
-  Multi-timeframe candles (M15–D1), four strategy engines, validation snapshots, and circuit breaker status.
-  Reference only — not investment advice.
-</p>
+<div class="page-head">
+  <h1>Live overview</h1>
+  <p class="lede">Multi-timeframe candles, strategy scores, validation snapshots, and circuit breaker — interactive charts refresh with each page load.</p>
+</div>
 
-<div class="grid" style="margin-top:1.25rem">
+<script type="application/json" id="dash-json-chart-btc">{{ chart_btc_json|safe }}</script>
+<script type="application/json" id="dash-json-chart-gold">{{ chart_gold_json|safe }}</script>
+<script type="application/json" id="dash-json-scores-charts">{{ scores_chart_json|safe }}</script>
+
+<div class="grid">
   <div class="card">
     <h2>Candles stored</h2>
-    <div class="metric">{{ candle_count }}</div>
-    <p style="color:var(--muted);font-size:.85rem;margin:.5rem 0 0">rows in <code>candles</code></p>
+    <div class="metric mono">{{ candle_count }}</div>
+    <p class="muted" style="margin:0.5rem 0 0">Rows in <code class="mono">candles</code></p>
   </div>
   <div class="card">
     <h2>Circuit breaker</h2>
     {% if circuit.paused_active %}
-      <div class="metric bad">PAUSED</div>
-      <p style="font-size:.85rem">Until {{ circuit.paused_until }}<br/>Streak counter: {{ circuit.consecutive_sl }}</p>
+      <div class="metric bad">Paused</div>
+      <p class="muted" style="margin:0.35rem 0 0">Until {{ circuit.paused_until }}<br/>Streak: {{ circuit.consecutive_sl }}</p>
     {% else %}
-      <div class="metric good">ACTIVE</div>
-      <p style="font-size:.85rem">Streak: {{ circuit.consecutive_sl }} / {{ streak_limit }}</p>
+      <div class="metric good">Active</div>
+      <p class="muted" style="margin:0.35rem 0 0">SL streak {{ circuit.consecutive_sl }} / {{ streak_limit }}</p>
     {% endif %}
   </div>
   <div class="card">
-    <h2>Latest validation</h2>
+    <h2>Latest validation job</h2>
     {% if last_job %}
-      <p><strong>{{ last_job.job_type }}</strong></p>
-      <p style="font-size:.75rem;color:var(--muted)">{{ last_job.created_at }}</p>
+      <p style="margin:0"><strong>{{ last_job.job_type }}</strong></p>
+      <p class="muted mono" style="margin:0.25rem 0 0;font-size:0.78rem">{{ last_job.created_at }}</p>
     {% else %}
-      <p style="color:var(--muted)">No snapshots yet — wait for scheduler or run worker.</p>
+      <p class="muted" style="margin:0">No snapshots yet — run the worker scheduler.</p>
     {% endif %}
   </div>
 </div>
 
-<h2 style="margin-top:2rem">Strategy scores (latest)</h2>
-<div class="grid">
-  {% for inst, rows in scores.items() %}
+<h2 class="section-title">Close price (M15, last ~120 bars)</h2>
+<div class="grid-2">
   <div class="card">
-    <h2>{{ inst }}</h2>
-    {% if not rows %}
-      <p style="color:var(--muted)">No data</p>
-    {% else %}
-      <table>
-        <thead><tr><th>Strategy</th><th>Score</th><th>Dir</th></tr></thead>
-        <tbody>
-          {% for r in rows %}
-          <tr>
-            <td>{{ r.strategy }}</td>
-            <td>{{ "%.0f"|format(r.score) }}</td>
-            <td>{{ r.direction }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% endif %}
+    <div class="card-title-lg">₿ BTC-USD</div>
+    <div class="chart-wrap"><canvas id="chartCloseBtc" aria-label="BTC close price chart"></canvas></div>
   </div>
-  {% endfor %}
+  <div class="card">
+    <div class="card-title-lg">🪙 GOLD</div>
+    <div class="chart-wrap"><canvas id="chartCloseGold" aria-label="Gold close price chart"></canvas></div>
+  </div>
+</div>
+
+<h2 class="section-title">Strategy scores</h2>
+<div class="split-panels">
+  <div class="card">
+    <div class="card-title-lg">🪙 GOLD · score by strategy</div>
+    <div class="chart-wrap chart-wrap--tall"><canvas id="chartScoresGold" aria-label="Gold strategy scores"></canvas></div>
+    <table style="margin-top:0.75rem">
+      <thead><tr><th>Strategy</th><th>Score</th><th>Dir</th></tr></thead>
+      <tbody>
+        {% for r in scores.get('GOLD', []) %}
+        {% set d = (r.direction or '')|lower %}
+        <tr>
+          <td>{{ r.strategy }}</td>
+          <td class="mono">{{ "%.0f"|format(r.score) }}</td>
+          <td>{% if 'long' in d or 'buy' in d %}<span class="chip chip-long">Long</span>{% elif 'short' in d or 'sell' in d %}<span class="chip chip-short">Short</span>{% else %}{{ r.direction }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% if not scores.get('GOLD') %}<tr><td colspan="3" class="muted">No rows</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <div class="card-title-lg">₿ BTC-USD · score by strategy</div>
+    <div class="chart-wrap chart-wrap--tall"><canvas id="chartScoresBtc" aria-label="BTC strategy scores"></canvas></div>
+    <table style="margin-top:0.75rem">
+      <thead><tr><th>Strategy</th><th>Score</th><th>Dir</th></tr></thead>
+      <tbody>
+        {% for r in scores.get('BTC-USD', []) %}
+        {% set d = (r.direction or '')|lower %}
+        <tr>
+          <td>{{ r.strategy }}</td>
+          <td class="mono">{{ "%.0f"|format(r.score) }}</td>
+          <td>{% if 'long' in d or 'buy' in d %}<span class="chip chip-long">Long</span>{% elif 'short' in d or 'sell' in d %}<span class="chip chip-short">Short</span>{% else %}{{ r.direction }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% if not scores.get('BTC-USD') %}<tr><td colspan="3" class="muted">No rows</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

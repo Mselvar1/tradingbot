@@ -1,11 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Circuit breaker{% endblock %}
+{% block title %}Circuit breaker — Signal Platform{% endblock %}
 {% block content %}
-<h1>Circuit breaker</h1>
-<div class="card" style="max-width:560px">
-  <p><strong>Consecutive SL (current):</strong> {{ circuit.consecutive_sl }}</p>
-  <p><strong>Trip threshold:</strong> {{ streak_limit }} SL → {{ pause_hours }}h pause on new entries</p>
-  <p><strong>Paused until:</strong> {{ circuit.paused_until or "—" }}</p>
-  <p><strong>Updated:</strong> {{ circuit.updated_at or "—" }}</p>
+<div class="page-head">
+  <h1>Circuit breaker</h1>
+  <p class="lede">After {{ streak_limit }} consecutive stop-loss outcomes, new entries pause for {{ pause_hours }} hours. Open positions are still managed.</p>
+</div>
+
+{% set lim = streak_limit if streak_limit > 0 else 1 %}
+{% set pct = [100, ((circuit.consecutive_sl / lim * 100) | int)] | min %}
+
+<div class="card" style="max-width:520px">
+  <h2>Current state</h2>
+  <p style="margin:0.25rem 0"><strong>Consecutive SL:</strong> <span class="mono">{{ circuit.consecutive_sl }}</span></p>
+  <p class="muted" style="margin:0 0 0.75rem;font-size:0.85rem">Trip threshold: {{ streak_limit }} SL → {{ pause_hours }}h pause on new entries</p>
+  <div class="progress-track" role="progressbar" aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100" aria-label="Streak toward trip threshold">
+    <div class="progress-fill" style="width: {{ pct }}%"></div>
+  </div>
+  <p style="margin:1rem 0 0"><strong>Paused until:</strong> {{ circuit.paused_until or "—" }}</p>
+  <p style="margin:0.35rem 0 0"><strong>Updated:</strong> {{ circuit.updated_at or "—" }}</p>
 </div>
 {% endblock %}

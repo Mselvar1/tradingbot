@@ -1,17 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Validation — Signal Platform{% endblock %}
 {% block content %}
-<h1>Validation snapshots</h1>
-<p style="color:var(--muted)">Backtest proxy, walk-forward, and Monte Carlo job outputs.</p>
-{% for s in snapshots %}
-<div class="card" style="margin-bottom:1rem">
-  <strong>{{ s.job_type }}</strong>
-  {% if s.instrument %}<span style="color:var(--muted)"> · {{ s.instrument }}</span>{% endif %}
-  <span style="color:var(--muted);font-size:.8rem"> · {{ s.created_at }}</span>
-  <pre class="json" style="margin-top:.75rem">{{ s.payload }}</pre>
+<div class="page-head">
+  <h1>Validation snapshots</h1>
+  <p class="lede">Backtest proxy, walk-forward splits, Monte Carlo, and full-cycle logs stored in <code class="mono">validation_snapshots</code>. Expand a row to read JSON.</p>
 </div>
+
+{% for s in snapshots %}
+<details class="snap">
+  <summary>
+    <span>{{ s.job_type }}</span>
+    {% if s.instrument %}<span class="snap-meta">{{ s.instrument }}</span>{% endif %}
+    <span class="snap-meta mono">{{ s.created_at }}</span>
+  </summary>
+  <pre class="json">{{ s.payload }}</pre>
+</details>
 {% endfor %}
+
 {% if not snapshots %}
-<p style="color:var(--muted)">No snapshots yet.</p>
+<p class="muted">No snapshots yet.</p>
 {% endif %}
 {% endblock %}
