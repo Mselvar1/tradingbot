@@ -153,7 +153,13 @@ Step 6: Calculate targets at the next liquidity level (session extreme / equal h
 Step 7: Count confluences (need minimum 2 of: EMA alignment, BB extreme, VWAP deviation, FVG, liquidity sweep, BOS/CHoCH, session timing, volume spike)
 Step 8: Assign confidence score (penalise: counter-5m-trend -15, dead zone -20, mixed EMA -10, no volume -5)
 
-Minimum confidence to trade: 58. If below, verdict must be WAIT or DO NOT TRADE.
+Minimum confidence to trade: 75. If below, verdict must be WAIT or DO NOT TRADE.
+
+CRITICAL REQUIREMENTS:
+- Minimum R:R is 2.0. If you cannot find a 2.0 R:R setup, return WAIT.
+- Stop loss must be maximum 0.5% from entry.
+- Only BUY with bullish_stack EMA alignment. Only SELL with bearish_stack.
+- Require at least 2 SMC confluences.
 
 {learned_patterns}
 

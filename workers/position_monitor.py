@@ -24,6 +24,7 @@ from services.data.capital import capital_client
 from services.memory import save_position_update
 from services.risk import risk
 from services.learning import record_closed_position
+from services.trade_store import trade_store
 
 MONITOR_INTERVAL = 120    # seconds between checks
 
@@ -194,6 +195,11 @@ def _build_message(pos: dict, state: dict, old_stop: float,
 async def _handle_closed_positions(closed_ids: set, session: str, bot, chat_id: int) -> None:
     """Record outcomes for any deal_ids that disappeared this cycle."""
     for deal_id in closed_ids:
+        # Skip deals intentionally closed by trade_manager — it records them separately
+        if deal_id in trade_store.manager_closed:
+            trade_store.manager_closed.discard(deal_id)
+            _states.pop(deal_id, None)
+            continue
         state = _states.get(deal_id)
         if not state:
             continue

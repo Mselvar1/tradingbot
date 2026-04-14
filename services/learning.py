@@ -28,6 +28,7 @@ from services.memory import (
     save_trade_insight,
     get_latest_insight,
     get_outcomes_for_analysis,
+    get_weekly_exits,
 )
 
 # ─── Defaults ──────────────────────────────────────────────────────────────────
@@ -432,82 +433,129 @@ async def get_prompt_injection(ticker: str) -> str:
 
 async def generate_weekly_report() -> str:
     """
-    Generates the Monday weekly Telegram report covering both GOLD and BTC-USD.
+    Monday weekly Telegram report covering GOLD + BTC-USD.
+    Pulls from both outcomes table and trade_exits table.
     """
-    from services.memory import get_outcomes_for_analysis  # local import, already imported above
+    now        = datetime.datetime.utcnow()
+    week_label = (now - datetime.timedelta(days=7)).strftime("%b %d")
+    week_end   = now.strftime("%b %d")
+
+    # Aggregate all exits this week (managed exits from trade_manager)
+    all_exits = await get_weekly_exits(days=7)
+    exits_by_ticker: dict[str, list] = {}
+    for ex in all_exits:
+        t = ex.get("ticker", "UNKNOWN")
+        exits_by_ticker.setdefault(t, []).append(ex)
 
     lines = [
-        "───────────────────",
-        "DUTCHALPHA WEEKLY REPORT",
+        f"📈 DUTCHALPHA WEEKLY REPORT",
+        f"Week: {week_label}–{week_end}",
+        "",
     ]
-    now = datetime.datetime.utcnow()
-    week_start = (now - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-    lines.append(f"Week of {week_start} → {now.strftime('%Y-%m-%d')}")
-    lines.append("───────────────────")
 
     for ticker in ("GOLD", "BTC-USD"):
         outcomes = await get_outcomes_for_analysis(ticker, limit=200, days=7)
-        if not outcomes:
-            lines.append(f"\n{ticker}: no trades this week")
+        exits    = exits_by_ticker.get(ticker, [])
+
+        # Combine both sources for total trade count and P&L
+        all_trades = outcomes  # outcomes covers everything (SL + managed exits via learning)
+        if not all_trades and not exits:
+            lines.append(f"{ticker}: no trades this week")
             continue
 
-        total  = len(outcomes)
-        wins   = sum(1 for o in outcomes if _is_win(o["result"]))
-        losses = sum(1 for o in outcomes if o["result"] == "sl")
+        total  = len(all_trades)
+        wins   = sum(1 for o in all_trades if _is_win(o["result"]))
+        losses = sum(1 for o in all_trades if o["result"] == "sl")
         wr     = _wr(wins, total)
-        net_pnl = round(sum(float(o.get("pnl_pct") or 0) for o in outcomes), 2)
+
+        # P&L from exits (have euro amounts)
+        net_euros  = round(sum(float(e.get("pnl_euros") or 0) for e in exits), 2)
+        avg_winner = 0.0
+        avg_loser  = 0.0
+        win_exits  = [e for e in exits if _f(e.get("pnl_euros")) > 0]
+        loss_exits = [e for e in exits if _f(e.get("pnl_euros")) <= 0]
+        if win_exits:
+            avg_winner = round(sum(_f(e["pnl_euros"]) for e in win_exits) / len(win_exits), 2)
+        if loss_exits:
+            avg_loser  = round(sum(_f(e["pnl_euros"]) for e in loss_exits) / len(loss_exits), 2)
+
+        # Profit factor
+        gross_win  = sum(_f(e["pnl_euros"]) for e in win_exits)
+        gross_loss = abs(sum(_f(e["pnl_euros"]) for e in loss_exits)) or 0.01
+        pf = round(gross_win / gross_loss, 2)
+
+        # Early exits saved
+        saved_total = round(sum(
+            _f(e.get("saved_vs_sl_pct")) / 100 * _f(e.get("entry_price")) * _f(e.get("size"))
+            for e in exits if _f(e.get("saved_vs_sl_pct")) > 0
+        ), 2)
 
         # Session breakdown
         sess: dict[str, dict] = {}
-        for o in outcomes:
+        for o in all_trades:
             s = (o.get("session") or "unknown").upper()
             sess.setdefault(s, {"w": 0, "t": 0})
             sess[s]["t"] += 1
             if _is_win(o["result"]):
                 sess[s]["w"] += 1
-        sess_wr = {s: _wr(d["w"], d["t"]) for s, d in sess.items() if d["t"] >= 1}
+        sess_wr    = {s: _wr(d["w"], d["t"]) for s, d in sess.items() if d["t"] >= 1}
         best_sess  = max(sess_wr, key=sess_wr.get) if sess_wr else "n/a"
         worst_sess = min(sess_wr, key=sess_wr.get) if sess_wr else "n/a"
 
-        # Setup breakdown
+        # Top setup from insights
         insight = await get_latest_insight(ticker)
-        top_setups     = insight.get("top_setups", [])    if insight else []
+        top_setups      = insight.get("top_setups", [])      if insight else []
         losing_patterns = insight.get("losing_patterns", []) if insight else []
 
-        # Suggestions
+        # Next-week suggestion
         suggestions = []
-        if sess_wr.get(best_sess, 0) > 0.65:
-            suggestions.append(f"Increase size on {best_sess} (strong {int(sess_wr[best_sess]*100)}% WR)")
         if sess_wr.get(worst_sess, 1) < 0.45:
-            suggestions.append(f"Reduce/avoid {worst_sess} ({int(sess_wr[worst_sess]*100)}% WR losing money)")
+            suggestions.append(f"{worst_sess} underperforming — reduce or skip next week")
+        if sess_wr.get(best_sess, 0) > 0.65:
+            suggestions.append(f"{best_sess} strong ({int(sess_wr[best_sess]*100)}% WR) — prioritise")
         if top_setups:
-            suggestions.append(f"Prioritise: {top_setups[0]['setup'][:50]}")
+            suggestions.append(f"Best setup: {top_setups[0]['setup'][:50]} ({int(top_setups[0]['win_rate']*100)}% WR)")
         if not suggestions:
             suggestions.append("Continue current strategy — no major adjustments needed")
 
-        lines.append(f"\n{'━'*19}")
-        lines.append(f"{ticker}")
-        lines.append(f"{'━'*19}")
-        lines.append(f"Trades:   {total}  ({wins}W / {losses}L)")
-        lines.append(f"Win rate: {int(wr*100)}%")
-        lines.append(f"Net PnL:  {net_pnl:+.2f}% (sum across trades)")
-        lines.append(f"\nSESSIONS")
-        for s, wr_val in sorted(sess_wr.items(), key=lambda x: x[1], reverse=True):
-            count = sess[s]["t"]
-            lines.append(f"  {s}: {int(wr_val*100)}% WR ({count} trades)")
+        pnl_sign = "+" if net_euros >= 0 else ""
+        lines += [
+            f"{'━'*19}",
+            f"{ticker}",
+            f"{'━'*19}",
+            f"Trades: {total} | Wins: {wins} | Losses: {losses}",
+            f"Win rate: {int(wr*100)}% | Profit factor: {pf}",
+            (f"Net P&L: {pnl_sign}€{net_euros}" if exits else
+             f"Net P&L: {wins}W/{losses}L (no euro data yet)"),
+            "",
+        ]
+        if best_sess != "n/a":
+            lines.append(f"Best session: {best_sess} ({int(sess_wr.get(best_sess,0)*100)}% WR)")
         if top_setups:
-            lines.append(f"\nBEST SETUPS (KEEP TRADING)")
-            for s in top_setups[:3]:
-                lines.append(f"  • {s['setup'][:55]}: {int(s['win_rate']*100)}% WR")
+            best_setup = top_setups[0]
+            lines.append(f"Best setup: {best_setup['setup'][:40]} ({int(best_setup['win_rate']*100)}% WR)")
+        if win_exits or loss_exits:
+            lines.append(f"Avg winner: €{avg_winner} | Avg loser: €{avg_loser}")
+        if saved_total > 0:
+            lines.append(f"Early exits saved: €{saved_total} this week")
         if losing_patterns:
-            lines.append(f"\nWORST PATTERNS (AVOID)")
-            for s in losing_patterns[:3]:
-                lines.append(f"  • {s['setup'][:55]}: {int(s['win_rate']*100)}% WR")
-        lines.append(f"\nSUGGESTIONS")
-        for sug in suggestions:
+            lines.append(f"Worst pattern: {losing_patterns[0]['setup'][:40]} ({int(losing_patterns[0]['win_rate']*100)}% WR — avoid)")
+        lines.append("")
+        lines.append("Next week adjustments:")
+        for sug in suggestions[:2]:
             lines.append(f"  → {sug}")
+        lines.append("")
 
-    lines.append("\n───────────────────")
-    lines.append("DutchAlpha — AI Trading Bot")
-    lines.append("───────────────────")
+    lines += [
+        "───────────────────",
+        "DutchAlpha — AI Trading Bot",
+        "───────────────────",
+    ]
     return "\n".join(lines)
+
+
+def _f(v) -> float:
+    try:
+        return float(v) if v is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0

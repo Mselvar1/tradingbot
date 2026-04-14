@@ -11,42 +11,40 @@ from services.memory import init_db, save_signal, get_memory_context
 from claude.client import analyse, review_signal
 from services.rate_limiter import claude_limiter
 from services.learning import get_dynamic_threshold, get_prompt_injection, register_trade_signal
+from services.price_tracker import price_tracker
+from services.trade_store import trade_store
 from claude.prompts.analysis import ANALYSIS_PROMPT, REVIEW_PROMPT
 from config.settings import settings
 
 GOLD_EPIC = "GOLD"
 SCAN_INTERVAL = 120
-CONFIDENCE_THRESHOLD = 60
-REVIEW_THRESHOLD = 60
+CONFIDENCE_THRESHOLD = 75
+REVIEW_THRESHOLD = 75
 MAX_CANDLES = 100
 
 
 def is_trading_session() -> bool:
+    """
+    Gold scans only during the two highest-quality windows:
+    - London open: 07:00-08:30 UTC
+    - NY open:     13:30-15:00 UTC
+    """
     now = datetime.datetime.utcnow()
-    weekday = now.weekday()
-    hour = now.hour
-    minute = now.minute
-    if weekday >= 5:
+    if now.weekday() >= 5:
         return False
-    time_now = hour * 60 + minute
-    in_london = (7 * 60) <= time_now <= (16 * 60)
-    in_ny = (13 * 60 + 30) <= time_now <= (20 * 60)
-    return in_london or in_ny
+    t = now.hour * 60 + now.minute
+    london_open = 7 * 60 <= t < 8 * 60 + 30
+    ny_open     = 13 * 60 + 30 <= t < 15 * 60
+    return london_open or ny_open
 
 
 def get_session_name() -> str:
     now = datetime.datetime.utcnow()
-    time_now = now.hour * 60 + now.minute
-    if 7 * 60 <= time_now <= 9 * 60:
+    t = now.hour * 60 + now.minute
+    if 7 * 60 <= t < 8 * 60 + 30:
         return "LONDON OPEN"
-    elif 9 * 60 < time_now <= 13 * 60 + 30:
-        return "LONDON MID"
-    elif 13 * 60 + 30 <= time_now <= 15 * 60 + 30:
+    elif 13 * 60 + 30 <= t < 15 * 60:
         return "NY OPEN"
-    elif 15 * 60 + 30 < time_now <= 17 * 60:
-        return "LONDON/NY OVERLAP"
-    elif 17 * 60 < time_now <= 20 * 60:
-        return "NY SESSION"
     else:
         return "OFF HOURS"
 
@@ -197,6 +195,7 @@ async def scan_gold(market_context: dict):
         )
 
     memory_context = await get_memory_context("GOLD")
+    live_narrative = price_tracker.get_narrative("GOLD")
 
     combined_news = (
         f"GOLD NEWS:\n{news_text}\n\n"
@@ -226,6 +225,7 @@ async def scan_gold(market_context: dict):
         support=pd["support"],
         resistance=pd["resistance"],
         sentiment=sentiment_text,
+        price_narrative=live_narrative,
         news=combined_news,
         learned_patterns=learned_patterns,
     )
@@ -250,6 +250,23 @@ async def scan_gold(market_context: dict):
         trend = result.get("trend_direction", "neutral")
         action = "buy" if trend == "bullish" else "sell"
         print(f"Gold: forced action to {action} based on trend ({trend})")
+
+    # MA trend filter: only trade with the trend
+    ma20 = pd.get("ma20", 0)
+    ma50 = pd.get("ma50", 0)
+    if ma20 and ma50:
+        if action == "buy" and ma20 <= ma50:
+            print(f"Gold: BUY rejected — MA20 ({ma20}) <= MA50 ({ma50}), no uptrend")
+            return None
+        if action == "sell" and ma20 >= ma50:
+            print(f"Gold: SELL rejected — MA20 ({ma20}) >= MA50 ({ma50}), no downtrend")
+            return None
+
+    # Minimum 2 SMC confluences required
+    confluences = result.get("confluences", [])
+    if len(confluences) < 2:
+        print(f"Gold: only {len(confluences)} confluence(s) — minimum 2 required, skipped")
+        return None
 
     review = {
         "approved": True,
@@ -342,49 +359,17 @@ async def format_signal(signal: dict) -> str:
     if signal.get("concerns"):
         concerns_text = "\nConcerns: " + " | ".join(signal["concerns"])
     return (
-        f"───────────────────\n"
-        f"DUTCHALPHA GOLD SIGNAL\n"
-        f"───────────────────\n"
-        f"GOLD {action} — {verdict}\n"
-        f"{signal.get('verdict_reason', '')}\n\n"
-        f"VERDICT: {signal.get('final_verdict', 'TAKE TRADE')}\n"
-        f"Confidence: {signal['confidence']}/100\n"
-        f"Session: {signal.get('session_context', 'n/a')}\n\n"
-        f"MARKET\n"
-        f"Price: {signal['price']} ({signal['change_pct']:+.2f}%)\n"
-        f"RSI: {signal['rsi']} — {signal['rsi_signal']}\n"
-        f"VIX: {signal['vix']} — {signal['regime']}\n"
-        f"Fear & Greed: {signal['fear_greed']}/100 ({signal['fear_greed_label']})\n"
-        f"Structure: {signal.get('market_structure', 'n/a').upper()}\n\n"
-        f"SMC CONFLUENCES\n"
-        f"{confluences_text}"
-        f"{smc_text}\n\n"
-        f"ENTRY\n"
-        f"Zone: {signal['entry']}\n"
-        f"Trigger: {signal['entry_trigger']}\n"
-        f"Best time: {signal['best_entry_time']}\n\n"
-        f"RISK MANAGEMENT\n"
-        f"Stop Loss: {signal['stop_loss']} (-{signal['stop_loss_pct']}%)\n"
-        f"Why: {signal['stop_loss_reason']}\n"
-        f"Advice: {signal.get('risk_comment', 'n/a')}\n\n"
-        f"TARGETS\n"
-        f"TP1: {signal['tp1']} (+{signal['tp1_pct']}%) — close 50%\n"
-        f"TP2: {signal['tp2']} (+{signal['tp2_pct']}%) — close 30%\n"
-        f"TP3: {signal['tp3']} (+{signal['tp3_pct']}%) — close 20%\n"
-        f"R:R: {signal['rr']}\n\n"
-        f"ANALYSIS\n"
-        f"Catalyst: {signal['news_catalyst']}\n"
-        f"{signal['summary']}\n\n"
-        f"INVALIDATION\n"
-        f"{signal['invalidation']}\n\n"
-        f"REVIEWER: {signal['review_summary']}"
+        f"🎯 GOLD {action} SIGNAL\n"
+        f"Confidence: {signal['confidence']}/100 | Session: {signal.get('session_context', 'n/a')}\n"
+        f"Entry: {signal['price']} | SL: {signal['stop_loss']} | TP1: {signal['tp1']}\n"
+        f"Confluences: {confluences_text}\n"
+        f"R:R: {signal['rr']} | Trend: {signal.get('market_structure', 'n/a').upper()}\n"
+        f"VIX: {signal['vix']} | F&G: {signal['fear_greed']}/100 ({signal['fear_greed_label']})\n"
+        f"{smc_text}"
+        f"\n{signal.get('summary', '')}"
+        f"\nInvalidation: {signal.get('invalidation', 'n/a')}"
+        f"{event_warning}"
         f"{concerns_text}"
-        f"{event_warning}\n\n"
-        f"───────────────────\n"
-        f"DutchAlpha — AI Gold Scalping\n"
-        f"Demo mode — not real money\n"
-        f"Trade smart. Manage risk always.\n"
-        f"───────────────────"
     )
 
 
@@ -426,18 +411,13 @@ async def run_scanner(bot, chat_id: int):
                     if trade_result["status"] == "success":
                         trade = trade_result["trade"]
                         trade_msg = (
-                            f"TRADE PLACED\n"
-                            f"GOLD {signal['action'].upper()}\n"
-                            f"Deal ID: {trade['deal_id']}\n"
-                            f"Size: {trade['size']} units\n"
-                            f"Entry: {trade['entry_price']}\n"
-                            f"Stop: {trade['stop_loss']}\n"
-                            f"TP: {trade['take_profit']}\n"
-                            f"Mode: {settings.capital_mode.upper()}"
+                            f"✅ TRADE PLACED — {settings.capital_mode.upper()}\n"
+                            f"GOLD {signal['action'].upper()} @ {trade['entry_price']}\n"
+                            f"Size: {trade['size']} | SL: {trade['stop_loss']} | TP: {trade['take_profit']}"
                         )
                         await bot.send_message(chat_id=chat_id, text=trade_msg)
                         print(f"Trade placed: {trade}")
-                        # Register deal→signal mapping for self-learning
+                        # Register for self-learning
                         register_trade_signal(
                             deal_id         = trade["deal_id"],
                             signal_id       = signal.get("db_id", 0),
@@ -446,6 +426,13 @@ async def run_scanner(bot, chat_id: int):
                             trend_direction = signal.get("trading_verdict", ""),
                             confluences     = signal.get("confluences", []),
                             session         = signal.get("session_context", session),
+                        )
+                        # Register for trade management
+                        trade_store.register(
+                            deal_id         = trade["deal_id"],
+                            signal          = signal,
+                            trade           = trade,
+                            entry_narrative = price_tracker.get_narrative("GOLD"),
                         )
                     else:
                         print(f"Trade blocked: {trade_result['reason']}")

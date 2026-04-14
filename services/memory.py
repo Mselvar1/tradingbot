@@ -73,6 +73,29 @@ async def init_db():
                 created_at    TIMESTAMP DEFAULT NOW()
             )
         """)
+        # ── Trade exits (managed closes by trade_manager) ─────────────────
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS trade_exits (
+                id               SERIAL PRIMARY KEY,
+                deal_id          VARCHAR(100),
+                ticker           VARCHAR(20),
+                direction        VARCHAR(10),
+                entry_price      FLOAT,
+                exit_price       FLOAT,
+                size             FLOAT,
+                pnl_pct          FLOAT,
+                pnl_euros        FLOAT,
+                exit_reason      VARCHAR(50),
+                hold_minutes     INTEGER,
+                confluences      TEXT,
+                session          VARCHAR(30),
+                entry_narrative  TEXT,
+                exit_narrative   TEXT,
+                sl_loss_pct      FLOAT,
+                saved_vs_sl_pct  FLOAT,
+                created_at       TIMESTAMP DEFAULT NOW()
+            )
+        """)
         # ── Extend outcomes table for self-learning ────────────────────────
         await conn.execute(
             "ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS rsi_at_entry FLOAT"
@@ -235,6 +258,59 @@ async def get_win_rate(ticker: str = "GOLD") -> dict:
             }
     except Exception as e:
         return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0}
+
+async def save_trade_exit(exit_data: dict) -> int:
+    """Save a managed trade exit to the trade_exits table."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO trade_exits (
+                    deal_id, ticker, direction, entry_price, exit_price,
+                    size, pnl_pct, pnl_euros, exit_reason, hold_minutes,
+                    confluences, session, entry_narrative, exit_narrative,
+                    sl_loss_pct, saved_vs_sl_pct
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                RETURNING id
+            """,
+                exit_data.get("deal_id", ""),
+                exit_data.get("ticker", ""),
+                exit_data.get("direction", ""),
+                float(exit_data.get("entry_price", 0)),
+                float(exit_data.get("exit_price", 0)),
+                float(exit_data.get("size", 0)),
+                float(exit_data.get("pnl_pct", 0)),
+                float(exit_data.get("pnl_euros", 0)),
+                exit_data.get("exit_reason", "unknown"),
+                int(exit_data.get("hold_minutes", 0)),
+                json.dumps(exit_data.get("confluences", [])),
+                exit_data.get("session", "unknown"),
+                exit_data.get("entry_narrative", ""),
+                exit_data.get("exit_narrative", ""),
+                float(exit_data.get("sl_loss_pct", 0)),
+                float(exit_data.get("saved_vs_sl_pct", 0)),
+            )
+            return row["id"] if row else 0
+    except Exception as e:
+        print(f"Save trade exit error: {e}")
+        return 0
+
+
+async def get_weekly_exits(days: int = 7) -> list:
+    """Return trade_exits rows from the last N days for the weekly report."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM trade_exits
+                WHERE created_at >= NOW() - INTERVAL '1 day' * $1
+                ORDER BY created_at DESC
+            """, days)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"Get weekly exits error: {e}")
+        return []
+
 
 async def save_trade_insight(insight: dict) -> int:
     """Persist a pattern-analysis snapshot to trade_insights."""

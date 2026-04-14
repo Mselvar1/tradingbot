@@ -11,7 +11,9 @@ from bot.handlers.history import cmd_signals, cmd_stats, cmd_outcome
 from workers.scanner import run_scanner
 from workers.btc_scanner import run_btc_scanner
 from workers.position_monitor import run_position_monitor
+from workers.trade_manager import run_trade_manager
 from workers.weekly_report import run_weekly_report
+from services.price_tracker import run_price_tracker
 from services.memory import init_db
 from config.settings import settings
 
@@ -36,8 +38,10 @@ async def post_init(app):
     asyncio.create_task(run_scanner(app.bot, chat_id))
     asyncio.create_task(run_btc_scanner(app.bot, chat_id))
     asyncio.create_task(run_position_monitor(app.bot, chat_id))
+    asyncio.create_task(run_trade_manager(app.bot, chat_id))
+    asyncio.create_task(run_price_tracker())
     asyncio.create_task(run_weekly_report(app.bot, chat_id))
-    print(f"Gold + BTC scanners + position monitor + weekly report started for chat_id: {chat_id}")
+    print(f"All workers started: scanners, position monitor, trade manager, price tracker, weekly report — chat_id: {chat_id}")
 
 def main():
     app = (

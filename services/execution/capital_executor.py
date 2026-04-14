@@ -6,7 +6,9 @@ from datetime import datetime
 
 MAX_RISK_PER_TRADE_PCT = 0.02   # 2% of account balance risked per trade
 MAX_OPEN_TRADES = 3
-MIN_RR = 1.8
+MIN_RR = 2.0
+MAX_STOP_PCT = 0.5              # stop loss must be within 0.5% of entry
+MIN_TP_PCT   = 0.3              # TP1 must be at least 0.3% from entry
 
 
 class CapitalExecutor:
@@ -97,6 +99,25 @@ class CapitalExecutor:
             return {"status": "blocked", "reason": "Invalid entry/stop/tp levels"}
 
         stop_distance_pct = abs(entry_price - stop_loss) / entry_price * 100
+        tp1_distance_pct  = abs(tp1 - entry_price) / entry_price * 100
+
+        if stop_distance_pct > MAX_STOP_PCT:
+            return {
+                "status": "blocked",
+                "reason": (
+                    f"Stop distance {stop_distance_pct:.3f}% exceeds max {MAX_STOP_PCT}% — "
+                    f"stop too wide"
+                )
+            }
+        if tp1_distance_pct < MIN_TP_PCT:
+            return {
+                "status": "blocked",
+                "reason": (
+                    f"TP1 distance {tp1_distance_pct:.3f}% below minimum {MIN_TP_PCT}% — "
+                    f"target too close"
+                )
+            }
+
         size = self.calculate_size(balance, entry_price, stop_distance_pct)
 
         await capital_client.ensure_session()

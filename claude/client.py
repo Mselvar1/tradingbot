@@ -47,6 +47,21 @@ async def review_signal(prompt: str) -> dict:
     except Exception:
         return {"error": "parse_failed", "raw": text}
 
+async def review_trade(prompt: str) -> dict:
+    """Trade management review — uses Haiku for speed (called every 5 min per position)."""
+    msg = await client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=300,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    text = msg.content[0].text
+    try:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        return json.loads(text[start:end])
+    except Exception:
+        return {"error": "parse_failed", "raw": text}
+
 async def analyse_image(b64: str) -> dict:
     msg = await client.messages.create(
         model="claude-sonnet-4-20250514",

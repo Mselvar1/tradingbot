@@ -26,6 +26,9 @@ Intraday resistance: {resistance}
 MARKET SENTIMENT:
 {sentiment}
 
+LIVE PRICE NARRATIVE:
+{price_narrative}
+
 NEWS AND MACRO CONTEXT:
 {news}
 
@@ -77,7 +80,7 @@ TAKE PROFIT RULES (SMC-based):
 - TP1: nearest buy-side or sell-side liquidity (exit 50%)
 - TP2: previous day high/low or major liquidity pool (exit 30%)
 - TP3: higher timeframe liquidity target (exit 20%)
-- Minimum R:R 1.5:1, target 2:1 or better
+- Minimum R:R 2.0:1 required — reject anything below this
 
 TRADING VERDICT RULES:
 - "STRONG BUY" — FVG + order block + liquidity sweep + session confluence all align
@@ -91,6 +94,13 @@ TRADING VERDICT RULES:
 - "AVOID" — high impact event, low volume, or against higher TF structure
 
 {learned_patterns}
+
+CRITICAL REQUIREMENTS — violating any of these means verdict must be WAIT or DO NOT TRADE:
+- Minimum R:R is 2.0. If you cannot find a setup with 2.0 R:R, return WAIT.
+- Stop loss must be maximum 0.5% from entry. Wider stops are rejected.
+- Only suggest BUY when MA20 > MA50 (uptrend confirmed). Only suggest SELL when MA20 < MA50.
+- Require at least 2 SMC confluences: FVG, order block, liquidity sweep, BOS, or CHoCH.
+- Never trade against the trend shown by MA20 vs MA50.
 
 Return exactly this structure:
 {{

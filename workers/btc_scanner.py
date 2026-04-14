@@ -12,6 +12,8 @@ from claude.client import analyse_btc as analyse
 from claude.prompts.btc_analysis import BTC_ANALYSIS_PROMPT
 from services.rate_limiter import claude_limiter
 from services.learning import get_dynamic_threshold, get_prompt_injection, register_trade_signal
+from services.price_tracker import price_tracker
+from services.trade_store import trade_store
 from config.settings import settings
 
 BTC_EPIC = "BTCUSD"         # used for /positions (order placement)
@@ -28,10 +30,10 @@ _BTC_EPIC_CANDIDATES = [
 _btc_candle_epic: str | None = None
 
 SCAN_INTERVAL = 300         # scan every 5 minutes
-CONFIDENCE_THRESHOLD = 58   # minimum confidence to place a trade
+CONFIDENCE_THRESHOLD = 75   # minimum confidence to place a trade
 NOTIFY_THRESHOLD = 75       # minimum confidence to send analysis to Telegram
 STRONG_VERDICTS = {"STRONG BUY", "STRONG SELL"}   # always notify regardless of score
-MIN_SIGNAL_GAP = 600        # 10 minutes between signals (up to ~6/hour in active sessions)
+MIN_SIGNAL_GAP = 600        # 10 minutes between signals
 MAX_CANDLES_1M = 150        # 1-minute candles for scalp indicators
 MAX_CANDLES_5M = 60         # 5-minute candles for higher-TF context
 
@@ -144,8 +146,18 @@ def get_btc_session() -> tuple[str, str]:
 
 
 def should_scan_btc() -> bool:
-    _, priority = get_btc_session()
-    return priority != "avoid"
+    """
+    BTC scans only during same high-quality windows as Gold:
+    - London open: 07:00-08:30 UTC
+    - NY open:     13:30-15:00 UTC
+    """
+    now = datetime.datetime.utcnow()
+    if now.weekday() >= 5:
+        return False
+    t = now.hour * 60 + now.minute
+    london_open = 7 * 60 <= t < 8 * 60 + 30
+    ny_open     = 13 * 60 + 30 <= t < 15 * 60
+    return london_open or ny_open
 
 
 # ─── Epic Resolution ──────────────────────────────────────────────────────────
@@ -420,7 +432,8 @@ async def scan_btc(market_context: dict) -> dict | None:
         liq_text = "\n  None detected"
 
     memory_context = await get_memory_context("BTC-USD")
-    fear_greed = market_context.get("fear_greed", {})
+    fear_greed     = market_context.get("fear_greed", {})
+    live_narrative = price_tracker.get_narrative("BTC-USD")
 
     combined_news = (
         f"BTC NEWS:\n{news_text}\n\n"
@@ -461,7 +474,7 @@ async def scan_btc(market_context: dict) -> dict | None:
         sentiment=market_context.get("summary", "No sentiment data."),
         fear_greed=fear_greed.get("value", 50),
         fear_greed_label=fear_greed.get("label", "Neutral"),
-        news=combined_news,
+        news=f"LIVE PRICE NARRATIVE:\n{live_narrative}\n\n{combined_news}",
         learned_patterns=learned_patterns,
     )
 
@@ -485,6 +498,21 @@ async def scan_btc(market_context: dict) -> dict | None:
     if action not in ("buy", "sell"):
         td = result.get("trend_direction", "neutral")
         action = "buy" if td == "bullish" else "sell"
+
+    # EMA alignment filter: only trade with EMA stack direction
+    ema_align = d.get("ema_alignment", "mixed")
+    if action == "buy" and ema_align != "bullish_stack":
+        print(f"BTC: BUY rejected — EMA alignment is {ema_align}, need bullish_stack")
+        return None
+    if action == "sell" and ema_align != "bearish_stack":
+        print(f"BTC: SELL rejected — EMA alignment is {ema_align}, need bearish_stack")
+        return None
+
+    # Minimum 2 SMC confluences required
+    confluences = result.get("confluences", [])
+    if len(confluences) < 2:
+        print(f"BTC: only {len(confluences)} confluence(s) — minimum 2 required, skipped")
+        return None
 
     return {
         "ticker": "BTC-USD",
@@ -683,19 +711,13 @@ async def run_btc_scanner(bot, chat_id: int):
                     if trade_result["status"] == "success":
                         trade = trade_result["trade"]
                         trade_msg = (
-                            f"BTC TRADE PLACED\n"
-                            f"BTC-USD {signal['action'].upper()}\n"
-                            f"Deal ID: {trade['deal_id']}\n"
-                            f"Confidence: {signal['confidence']}/100\n"
-                            f"Size: {trade['size']} units\n"
-                            f"Entry: {_p(trade['entry_price'])}\n"
-                            f"Stop:  {_p(trade['stop_loss'])}\n"
-                            f"TP:    {_p(trade['take_profit'])}\n"
-                            f"Mode:  {settings.capital_mode.upper()}"
+                            f"✅ TRADE PLACED — {settings.capital_mode.upper()}\n"
+                            f"BTC-USD {signal['action'].upper()} @ {_p(trade['entry_price'])}\n"
+                            f"Size: {trade['size']} | SL: {_p(trade['stop_loss'])} | TP: {_p(trade['take_profit'])}"
                         )
                         await bot.send_message(chat_id=chat_id, text=trade_msg)
                         print(f"BTC trade placed: {trade}")
-                        # Register deal→signal mapping for self-learning
+                        # Register for self-learning
                         register_trade_signal(
                             deal_id         = trade["deal_id"],
                             signal_id       = signal_id,
@@ -704,6 +726,13 @@ async def run_btc_scanner(bot, chat_id: int):
                             trend_direction = signal.get("trading_verdict", ""),
                             confluences     = signal.get("confluences", []),
                             session         = signal.get("session_context", ""),
+                        )
+                        # Register for trade management
+                        trade_store.register(
+                            deal_id         = trade["deal_id"],
+                            signal          = signal,
+                            trade           = trade,
+                            entry_narrative = price_tracker.get_narrative("BTC-USD"),
                         )
                     else:
                         print(f"BTC trade blocked: {trade_result.get('reason', '?')}")

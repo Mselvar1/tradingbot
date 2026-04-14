@@ -348,4 +348,30 @@ class CapitalClient:
             return {"status": "error", "reason": str(e)}
 
 
+    async def close_position_partial(self, deal_id: str, size: float) -> dict:
+        """
+        Attempt a partial close by passing size in the DELETE body.
+        Capital.com demo may not support this — falls back to full close.
+        Returns {"status", "partial": bool, "response"}.
+        """
+        try:
+            async with aiohttp.ClientSession() as s:
+                r = await s.delete(
+                    f"{self.base_url}/positions/{deal_id}",
+                    headers=self.get_headers(),
+                    json={"size": size}
+                )
+                d = await r.json()
+                if r.status == 200:
+                    return {"status": "success", "partial": True, "response": d}
+                # Partial not supported — fall back to full close
+                err = d.get("errorCode", "")
+                print(f"Partial close unsupported ({err}) — falling back to full close")
+                full = await self.close_position(deal_id)
+                full["partial"] = False
+                return full
+        except Exception as e:
+            return {"status": "error", "reason": str(e)}
+
+
 capital_client = CapitalClient()
