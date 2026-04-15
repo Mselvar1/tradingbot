@@ -2,6 +2,7 @@
 {% block title %}Overview — Signal Platform{% endblock %}
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" defer></script>
 <script src="/static/dashboard.js" defer></script>
 {% endblock %}
 {% block body_attrs %}data-dash-page="index"{% endblock %}
@@ -13,8 +14,11 @@
 
 <script type="application/json" id="dash-json-chart-btc">{{ chart_btc_json|safe }}</script>
 <script type="application/json" id="dash-json-chart-gold">{{ chart_gold_json|safe }}</script>
+<script type="application/json" id="dash-json-chart-btc-ohlc">{{ chart_btc_ohlc_json|safe }}</script>
+<script type="application/json" id="dash-json-chart-gold-ohlc">{{ chart_gold_ohlc_json|safe }}</script>
 <script type="application/json" id="dash-json-scores-charts">{{ scores_chart_json|safe }}</script>
 <script type="application/json" id="dash-json-performance-home">{{ perf_json|safe }}</script>
+<script type="application/json" id="dash-json-live-feed">{{ live_feed_json|safe }}</script>
 
 <div class="grid">
   <div class="card">
@@ -47,6 +51,46 @@
     <div class="metric" style="color:var(--green)">{{ po.win_rate }}%</div>
     <p class="muted" style="margin:0.35rem 0 0">{{ po.total }} closes · {{ po.wins }} TP · {{ po.losses }} SL · {{ po.other }} other</p>
     <a href="/performance" class="btn" style="margin-top:0.75rem">Full performance</a>
+  </div>
+</div>
+
+<h2 class="section-title">Live bot activity</h2>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title-lg">🤖 Scanner heartbeat</div>
+    <div class="bot-visual">
+      <div class="bot-orb"></div>
+      <div>
+        <p style="margin:0 0 .35rem"><strong>Bot is scanning for trades</strong></p>
+        <p class="muted" style="margin:0">Auto-refreshing activity feed every 20s. No money fields exposed.</p>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title-lg">📜 Live running feed</div>
+    <ul id="liveFeedList" class="log-feed">
+      {% for it in live_feed %}
+      <li class="log-item">
+        <div class="log-time mono">{{ it.ts }}</div>
+        <div><strong>{{ it.headline }}</strong> <span class="muted">· {{ it.detail }}</span></div>
+      </li>
+      {% endfor %}
+      {% if not live_feed %}
+      <li class="log-item muted">No activity yet.</li>
+      {% endif %}
+    </ul>
+  </div>
+</div>
+
+<h2 class="section-title">Candlesticks (M15)</h2>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title-lg">₿ BTC-USD</div>
+    <div id="chartCandleBtc" class="candle-wrap" aria-label="BTC candlestick chart"></div>
+  </div>
+  <div class="card">
+    <div class="card-title-lg">🪙 GOLD</div>
+    <div id="chartCandleGold" class="candle-wrap" aria-label="Gold candlestick chart"></div>
   </div>
 </div>
 

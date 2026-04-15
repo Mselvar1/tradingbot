@@ -46,6 +46,15 @@
     }
   }
 
+  function esc(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   function barColors(directions) {
     return (directions || []).map((d) => {
       const x = String(d || "").toLowerCase();
@@ -142,6 +151,9 @@
     const gold = readJson("dash-json-chart-gold");
     const scores = readJson("dash-json-scores-charts");
     const perfHome = readJson("dash-json-performance-home");
+    const btcOhlc = readJson("dash-json-chart-btc-ohlc");
+    const goldOhlc = readJson("dash-json-chart-gold-ohlc");
+    const initialFeed = readJson("dash-json-live-feed");
     lineChart("chartCloseBtc", btc, "Close (M15)", [124, 92, 255]);
     lineChart("chartCloseGold", gold, "Close (M15)", [255, 193, 7]);
     if (scores) {
@@ -152,6 +164,12 @@
       doughnutOutcome("chartHomeOutcomePie", perfHome.overall);
       barOutcomesByTicker("chartHomeOutcomeByTicker", perfHome.by_ticker);
     }
+    candleChart("chartCandleBtc", btcOhlc || []);
+    candleChart("chartCandleGold", goldOhlc || []);
+    if (initialFeed && initialFeed.length) {
+      renderLiveFeed(initialFeed);
+    }
+    startLiveFeedPolling();
   }
 
   function initStrategies() {
@@ -297,6 +315,77 @@
     if (!perf) return;
     doughnutOutcome("chartOutcomePie", perf.overall);
     barOutcomesByTicker("chartOutcomeByTicker", perf.by_ticker);
+  }
+
+  function candleChart(containerId, series) {
+    const el = document.getElementById(containerId);
+    if (!el || typeof LightweightCharts === "undefined") return;
+    const rows = Array.isArray(series) ? series : [];
+    if (!rows.length) return;
+    const chart = LightweightCharts.createChart(el, {
+      layout: {
+        background: { color: "#111827" },
+        textColor: "#94a3b8",
+        fontFamily: "'DM Sans', system-ui, sans-serif",
+      },
+      grid: {
+        vertLines: { color: "rgba(42,53,72,.45)" },
+        horzLines: { color: "rgba(42,53,72,.45)" },
+      },
+      rightPriceScale: { borderColor: "rgba(42,53,72,.9)" },
+      timeScale: {
+        borderColor: "rgba(42,53,72,.9)",
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      crosshair: { mode: 0 },
+      autoSize: true,
+    });
+    const c = chart.addCandlestickSeries({
+      upColor: "rgba(52, 211, 153, 0.95)",
+      downColor: "rgba(248, 113, 113, 0.95)",
+      borderVisible: false,
+      wickUpColor: "rgba(52, 211, 153, 0.95)",
+      wickDownColor: "rgba(248, 113, 113, 0.95)",
+    });
+    c.setData(rows);
+    chart.timeScale().fitContent();
+  }
+
+  function renderLiveFeed(items) {
+    const list = document.getElementById("liveFeedList");
+    if (!list) return;
+    const rows = Array.isArray(items) ? items : [];
+    if (!rows.length) {
+      list.innerHTML = '<li class="log-item muted">No activity yet.</li>';
+      return;
+    }
+    list.innerHTML = rows
+      .slice(0, 40)
+      .map(
+        (it) => `
+          <li class="log-item">
+            <div class="log-time mono">${esc(it.ts)}</div>
+            <div><strong>${esc(it.headline)}</strong> <span class="muted">· ${esc(it.detail)}</span></div>
+          </li>`
+      )
+      .join("");
+  }
+
+  function startLiveFeedPolling() {
+    const list = document.getElementById("liveFeedList");
+    if (!list) return;
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/live/activity?limit=32", { cache: "no-store" });
+        if (!r.ok) return;
+        const data = await r.json();
+        renderLiveFeed(data.items || []);
+      } catch {
+        // silent best-effort polling
+      }
+    };
+    window.setInterval(tick, 20000);
   }
 
   document.addEventListener("DOMContentLoaded", () => {

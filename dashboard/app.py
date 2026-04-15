@@ -21,7 +21,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 from config.settings import settings
-from services.memory import count_all_candles, fetch_performance_dashboard, init_db
+from services.memory import (
+    count_all_candles,
+    fetch_performance_dashboard,
+    get_pool,
+    init_db,
+)
 from services.signal_platform.circuit_breaker import get_state, is_paused
 from services.signal_platform.candles_store import fetch_candles_from_db
 from services.signal_platform.strategy_runner import latest_scores_summary
@@ -78,6 +83,29 @@ def _series_for_chart(rows: list) -> dict:
     return {"labels": labels, "closes": closes}
 
 
+def _ohlc_series_for_chart(rows: list) -> list[dict]:
+    """OHLC series for candlestick charts."""
+    out: list[dict] = []
+    for r in rows:
+        ot = r.get("open_time")
+        if hasattr(ot, "timestamp"):
+            ts = int(ot.timestamp())
+        else:
+            ts = None
+        if ts is None:
+            continue
+        out.append(
+            {
+                "time": ts,
+                "open": float(r.get("open_price") or 0),
+                "high": float(r.get("high_price") or 0),
+                "low": float(r.get("low_price") or 0),
+                "close": float(r.get("close_price") or 0),
+            }
+        )
+    return out
+
+
 def _scores_chart_payload(scores: dict) -> dict:
     """Per-instrument bar chart data (sorted by score desc)."""
     out: dict[str, dict] = {}
@@ -92,6 +120,62 @@ def _scores_chart_payload(scores: dict) -> dict:
             "directions": [str(r.get("direction") or "").lower() for r in sorted_rows],
         }
     return out
+
+
+async def _live_activity_feed(limit: int = 30) -> list[dict]:
+    """
+    Build a dashboard-safe pseudo log stream from DB activity.
+    No price/size/PnL values are included.
+    """
+    lim = max(5, min(limit, 100))
+    pool = await get_pool()
+    out: list[dict] = []
+    async with pool.acquire() as conn:
+        sig_rows = await conn.fetch(
+            """
+            SELECT id, ticker, action, confidence, session_context, created_at
+            FROM signals
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            lim,
+        )
+        out_rows = await conn.fetch(
+            """
+            SELECT id, ticker, action, result, hold_minutes, created_at
+            FROM outcomes
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            lim,
+        )
+
+    for r in sig_rows:
+        created = r["created_at"]
+        out.append(
+            {
+                "type": "signal",
+                "ts": created.isoformat() if created and hasattr(created, "isoformat") else str(created),
+                "headline": f"{r['ticker']} {str(r['action']).upper()} signal",
+                "detail": (
+                    f"confidence={int(float(r['confidence'] or 0))} "
+                    f"session={r['session_context'] or 'n/a'}"
+                ),
+            }
+        )
+    for r in out_rows:
+        created = r["created_at"]
+        out.append(
+            {
+                "type": "outcome",
+                "ts": created.isoformat() if created and hasattr(created, "isoformat") else str(created),
+                "headline": f"{r['ticker']} outcome {r['result'] or 'n/a'}",
+                "detail": f"side={r['action'] or 'n/a'} hold={r['hold_minutes'] or 0}m",
+            }
+        )
+
+    out.sort(key=lambda x: x.get("ts", ""), reverse=True)
+    return out[:lim]
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -114,14 +198,17 @@ async def index(request: Request):
             **last_job,
             "payload": json.dumps(last_job["payload"])[:400],
         }
-    scores, btc_rows, gold_rows, perf = await asyncio.gather(
+    scores, btc_rows, gold_rows, perf, live_feed = await asyncio.gather(
         latest_scores_summary(),
         fetch_candles_from_db("BTC-USD", "M15", limit=120),
         fetch_candles_from_db("GOLD", "M15", limit=120),
         fetch_performance_dashboard(8),
+        _live_activity_feed(32),
     )
     chart_btc_json = json.dumps(_series_for_chart(btc_rows))
     chart_gold_json = json.dumps(_series_for_chart(gold_rows))
+    chart_btc_ohlc_json = json.dumps(_ohlc_series_for_chart(btc_rows))
+    chart_gold_ohlc_json = json.dumps(_ohlc_series_for_chart(gold_rows))
     scores_chart_json = json.dumps(_scores_chart_payload(scores))
     perf_json = json.dumps(perf)
     return templates.TemplateResponse(
@@ -135,9 +222,13 @@ async def index(request: Request):
             "streak_limit": getattr(settings, "circuit_breaker_sl_streak", 8),
             "chart_btc_json": chart_btc_json,
             "chart_gold_json": chart_gold_json,
+            "chart_btc_ohlc_json": chart_btc_ohlc_json,
+            "chart_gold_ohlc_json": chart_gold_ohlc_json,
             "scores_chart_json": scores_chart_json,
             "perf": perf,
             "perf_json": perf_json,
+            "live_feed": live_feed,
+            "live_feed_json": json.dumps(live_feed),
         },
     )
 
@@ -180,6 +271,29 @@ async def api_chart_candles(
         limit = 500
     rows = await fetch_candles_from_db(instrument, tf, limit=limit)
     return JSONResponse(_series_for_chart(rows))
+
+
+@app.get("/api/chart/candles-ohlc")
+async def api_chart_candles_ohlc(
+    instrument: str = "BTC-USD",
+    tf: str = "M15",
+    limit: int = 120,
+):
+    """JSON OHLC series for candlestick rendering."""
+    if not settings.database_url:
+        raise HTTPException(503, "DATABASE_URL not set")
+    if limit > 500:
+        limit = 500
+    rows = await fetch_candles_from_db(instrument, tf, limit=limit)
+    return JSONResponse({"series": _ohlc_series_for_chart(rows)})
+
+
+@app.get("/api/live/activity")
+async def api_live_activity(limit: int = 30):
+    """Dashboard-safe recent activity stream (signals + outcomes)."""
+    if not settings.database_url:
+        raise HTTPException(503, "DATABASE_URL not set")
+    return JSONResponse({"items": await _live_activity_feed(limit)})
 
 
 @app.get("/strategies", response_class=HTMLResponse)

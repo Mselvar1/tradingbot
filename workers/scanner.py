@@ -40,11 +40,19 @@ def is_trading_session() -> bool:
 
 def get_session_name() -> str:
     now = datetime.datetime.utcnow()
+    if now.weekday() >= 5:
+        return "WEEKEND"
     t = now.hour * 60 + now.minute
     if 7 * 60 <= t < 8 * 60 + 30:
         return "LONDON OPEN"
+    elif 8 * 60 + 30 <= t < 13 * 60 + 30:
+        return "LONDON MID"
     elif 13 * 60 + 30 <= t < 15 * 60:
         return "NY OPEN"
+    elif 15 * 60 <= t < 21 * 60:
+        return "NY MID"
+    elif 2 * 60 <= t < 7 * 60:
+        return "ASIAN SESSION"
     else:
         return "OFF HOURS"
 
@@ -147,19 +155,19 @@ async def has_scalp_setup(pd: dict) -> bool:
     score = 0
     if rsi > 68 or rsi < 32:
         score += 2
-    elif rsi > 63 or rsi < 37:
+    elif rsi > 60 or rsi < 40:
         score += 1
     if change_pct > 0.4:
         score += 2
     elif change_pct > 0.2:
         score += 1
-    if atr > 0 and price > 0 and (atr / price * 100) > 0.2:
+    if atr > 0 and price > 0 and (atr / price * 100) > 0.12:
         score += 1
     for fvg in fvg_zones:
         if fvg["low"] <= price <= fvg["high"]:
             score += 2
             break
-    return score >= 3
+    return score >= 2
 
 
 async def scan_gold(market_context: dict):
@@ -170,10 +178,6 @@ async def scan_gold(market_context: dict):
 
     if await is_paused():
         print("Gold: circuit breaker pause — skipped")
-        return None
-
-    if not is_trading_session():
-        print(f"Gold: outside trading hours ({get_session_name()}) — skipped")
         return None
 
     if is_session_choppy_window():
@@ -199,8 +203,8 @@ async def scan_gold(market_context: dict):
     # Claude pre-filter: only analyse when RSI is extreme or ATR is elevated
     rsi      = pd["rsi"]
     atr_pct  = (pd["atr"] / pd["price"] * 100) if pd["price"] else 0
-    rsi_extreme = rsi < 38 or rsi > 62
-    atr_high    = atr_pct > 0.15
+    rsi_extreme = rsi < 40 or rsi > 60
+    atr_high    = atr_pct > 0.12
     if not (rsi_extreme or atr_high):
         print(
             f"Gold: pre-filter skipped "
@@ -428,67 +432,64 @@ async def run_scanner(bot, chat_id: int):
     print("Gold scalping scanner started...")
     await init_db()
     last_signal_time = None
-    min_signal_gap = 900
+    min_signal_gap = 600
     while True:
         try:
-            if is_trading_session():
-                session = get_session_name()
-                print(f"Scanning GOLD ({session})...")
-                market_context = await get_market_context()
-                print(f"Fear & Greed: {market_context['fear_greed']['value']} — {market_context['fear_greed']['label']}")
-                now = datetime.datetime.utcnow().timestamp()
-                if last_signal_time and (now - last_signal_time) < min_signal_gap:
-                    print("Signal cooldown active — waiting")
-                    await asyncio.sleep(SCAN_INTERVAL)
-                    continue
-                signal = await scan_gold(market_context)
-                if signal:
-                    msg = await format_signal(signal)
-                    await bot.send_message(chat_id=chat_id, text=msg)
-                    if settings.public_channel_id:
-                        try:
-                            await bot.send_message(
-                                chat_id=settings.public_channel_id,
-                                text=msg
-                            )
-                        except Exception as e:
-                            print(f"Channel post failed: {e}")
-                    history.save(signal)
-                    signal_id = await save_signal(signal)
-                    signal["db_id"] = signal_id
-                    last_signal_time = now
-                    print(f"Gold signal sent and saved (db_id: {signal_id})")
-                    trade_result = await executor.place_trade(signal)
-                    if trade_result["status"] == "success":
-                        trade = trade_result["trade"]
-                        trade_msg = (
-                            f"✅ TRADE PLACED — {settings.capital_mode.upper()}\n"
-                            f"GOLD {signal['action'].upper()} @ {trade['entry_price']}\n"
-                            f"Size: {trade['size']} | SL: {trade['stop_loss']} | TP: {trade['take_profit']}"
+            session = get_session_name()
+            print(f"Scanning GOLD ({session})...")
+            market_context = await get_market_context()
+            print(f"Fear & Greed: {market_context['fear_greed']['value']} — {market_context['fear_greed']['label']}")
+            now = datetime.datetime.utcnow().timestamp()
+            if last_signal_time and (now - last_signal_time) < min_signal_gap:
+                print("Signal cooldown active — waiting")
+                await asyncio.sleep(SCAN_INTERVAL)
+                continue
+            signal = await scan_gold(market_context)
+            if signal:
+                msg = await format_signal(signal)
+                await bot.send_message(chat_id=chat_id, text=msg)
+                if settings.public_channel_id:
+                    try:
+                        await bot.send_message(
+                            chat_id=settings.public_channel_id,
+                            text=msg
                         )
-                        await bot.send_message(chat_id=chat_id, text=trade_msg)
-                        print(f"Trade placed: {trade}")
-                        # Register for self-learning
-                        register_trade_signal(
-                            deal_id         = trade["deal_id"],
-                            signal_id       = signal.get("db_id", 0),
-                            ticker          = "GOLD",
-                            rsi             = signal.get("rsi", 0),
-                            trend_direction = signal.get("trading_verdict", ""),
-                            confluences     = signal.get("confluences", []),
-                            session         = signal.get("session_context", session),
-                        )
-                        # Register for trade management
-                        trade_store.register(
-                            deal_id         = trade["deal_id"],
-                            signal          = signal,
-                            trade           = trade,
-                            entry_narrative = price_tracker.get_narrative("GOLD"),
-                        )
-                    else:
-                        print(f"Trade blocked: {trade_result['reason']}")
-            else:
-                print(f"Outside trading hours ({get_session_name()}) — sleeping")
+                    except Exception as e:
+                        print(f"Channel post failed: {e}")
+                history.save(signal)
+                signal_id = await save_signal(signal)
+                signal["db_id"] = signal_id
+                last_signal_time = now
+                print(f"Gold signal sent and saved (db_id: {signal_id})")
+                trade_result = await executor.place_trade(signal)
+                if trade_result["status"] == "success":
+                    trade = trade_result["trade"]
+                    trade_msg = (
+                        f"✅ TRADE PLACED — {settings.capital_mode.upper()}\n"
+                        f"GOLD {signal['action'].upper()} @ {trade['entry_price']}\n"
+                        f"Size: {trade['size']} | SL: {trade['stop_loss']} | TP: {trade['take_profit']}"
+                    )
+                    await bot.send_message(chat_id=chat_id, text=trade_msg)
+                    print(f"Trade placed: {trade}")
+                    # Register for self-learning
+                    register_trade_signal(
+                        deal_id         = trade["deal_id"],
+                        signal_id       = signal.get("db_id", 0),
+                        ticker          = "GOLD",
+                        rsi             = signal.get("rsi", 0),
+                        trend_direction = signal.get("trading_verdict", ""),
+                        confluences     = signal.get("confluences", []),
+                        session         = signal.get("session_context", session),
+                    )
+                    # Register for trade management
+                    trade_store.register(
+                        deal_id         = trade["deal_id"],
+                        signal          = signal,
+                        trade           = trade,
+                        entry_narrative = price_tracker.get_narrative("GOLD"),
+                    )
+                else:
+                    print(f"Trade blocked: {trade_result['reason']}")
             await asyncio.sleep(SCAN_INTERVAL)
         except Exception as e:
             print(f"Scanner error: {e}")
