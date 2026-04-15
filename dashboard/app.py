@@ -133,7 +133,7 @@ async def _live_activity_feed(limit: int = 30) -> list[dict]:
     async with pool.acquire() as conn:
         sig_rows = await conn.fetch(
             """
-            SELECT id, ticker, action, confidence, session_context, created_at
+            SELECT id, ticker, action, confidence, session AS session_context, created_at
             FROM signals
             ORDER BY created_at DESC
             LIMIT $1
