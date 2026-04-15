@@ -567,3 +567,77 @@ details.snap pre {
   color: var(--muted);
   margin-bottom: 0.25rem;
 }
+
+.terminal-shell {
+  margin-top: 1rem;
+  border-radius: 14px;
+  border: 1px solid #2f3642;
+  overflow: hidden;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45);
+}
+
+.terminal-head {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.55rem 0.8rem;
+  background: linear-gradient(180deg, #3a3f46, #2a2e35);
+  border-bottom: 1px solid #1e2228;
+}
+
+.terminal-lights {
+  display: inline-flex;
+  gap: 0.42rem;
+}
+
+.term-light {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: inset 0 -1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.term-light.red {
+  background: #ff5f57;
+}
+
+.term-light.yellow {
+  background: #febc2e;
+}
+
+.term-light.green {
+  background: #28c840;
+}
+
+.terminal-title {
+  color: #d3d8df;
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+}
+
+.terminal-body {
+  background: #0b1016;
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.terminal-feed {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  list-style: none;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.terminal-line {
+  color: #8cf6b5;
+  font-size: 0.73rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin: 0 0 0.28rem;
+  text-shadow: 0 0 6px rgba(116, 239, 161, 0.08);
+}
+
+.terminal-line:nth-child(2n) {
+  color: #79eecf;
+}

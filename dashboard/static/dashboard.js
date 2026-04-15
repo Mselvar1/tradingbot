@@ -46,6 +46,15 @@
     }
   }
 
+  function setLastPrice(labelId, rows) {
+    const el = document.getElementById(labelId);
+    if (!el || !Array.isArray(rows) || !rows.length) return;
+    const last = rows[rows.length - 1];
+    const v = Number(last.close || last.c || 0);
+    if (!Number.isFinite(v) || v <= 0) return;
+    el.textContent = `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  }
+
   function esc(s) {
     return String(s || "")
       .replace(/&/g, "&amp;")
@@ -164,12 +173,15 @@
       doughnutOutcome("chartHomeOutcomePie", perfHome.overall);
       barOutcomesByTicker("chartHomeOutcomeByTicker", perfHome.by_ticker);
     }
-    candleChart("chartCandleBtc", btcOhlc || []);
-    candleChart("chartCandleGold", goldOhlc || []);
+    candleChart("chartCandleBtc", btcOhlc || [], "btc");
+    candleChart("chartCandleGold", goldOhlc || [], "gold");
+    setLastPrice("btcLastPrice", btcOhlc || []);
+    setLastPrice("goldLastPrice", goldOhlc || []);
     if (initialFeed && initialFeed.length) {
       renderLiveFeed(initialFeed);
     }
     startLiveFeedPolling();
+    startCandlesPolling();
   }
 
   function initStrategies() {
@@ -317,7 +329,12 @@
     barOutcomesByTicker("chartOutcomeByTicker", perf.by_ticker);
   }
 
-  function candleChart(containerId, series) {
+  const candleState = {
+    btc: null,
+    gold: null,
+  };
+
+  function candleChart(containerId, series, key) {
     const el = document.getElementById(containerId);
     if (!el || typeof LightweightCharts === "undefined") return;
     const rows = Array.isArray(series) ? series : [];
@@ -350,23 +367,25 @@
     });
     c.setData(rows);
     chart.timeScale().fitContent();
+    if (key && candleState[key] !== undefined) {
+      candleState[key] = c;
+    }
   }
 
   function renderLiveFeed(items) {
-    const list = document.getElementById("liveFeedList");
+    const list = document.getElementById("terminalFeedList");
     if (!list) return;
     const rows = Array.isArray(items) ? items : [];
     if (!rows.length) {
-      list.innerHTML = '<li class="log-item muted">No activity yet.</li>';
+      list.innerHTML = '<li class="terminal-line mono">[boot] waiting for activity...</li>';
       return;
     }
     list.innerHTML = rows
       .slice(0, 40)
       .map(
         (it) => `
-          <li class="log-item">
-            <div class="log-time mono">${esc(it.ts)}</div>
-            <div><strong>${esc(it.headline)}</strong> <span class="muted">· ${esc(it.detail)}</span></div>
+          <li class="terminal-line mono">
+            [${esc(it.ts)}] ${esc(String(it.type || "evt").toUpperCase())} · ${esc(it.headline)} — ${esc(it.detail)}
           </li>`
       )
       .join("");
@@ -386,6 +405,32 @@
       }
     };
     window.setInterval(tick, 20000);
+  }
+
+  function startCandlesPolling() {
+    const tick = async (instrument, key, priceId) => {
+      try {
+        const r = await fetch(
+          `/api/chart/candles-ohlc?instrument=${encodeURIComponent(instrument)}&tf=M15&limit=120`,
+          { cache: "no-store" }
+        );
+        if (!r.ok) return;
+        const data = await r.json();
+        const rows = data.series || [];
+        if (candleState[key] && rows.length) {
+          candleState[key].setData(rows);
+        }
+        setLastPrice(priceId, rows);
+      } catch {
+        // best effort polling
+      }
+    };
+
+    const loop = () => {
+      tick("BTC-USD", "btc", "btcLastPrice");
+      tick("GOLD", "gold", "goldLastPrice");
+    };
+    window.setInterval(loop, 20000);
   }
 
   document.addEventListener("DOMContentLoaded", () => {
