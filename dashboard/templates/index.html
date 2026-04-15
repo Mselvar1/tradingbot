@@ -3,6 +3,7 @@
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" defer></script>
 <script src="/static/dashboard.js" defer></script>
 {% endblock %}
 {% block body_attrs %}data-dash-page="index"{% endblock %}
@@ -19,6 +20,20 @@
 <script type="application/json" id="dash-json-scores-charts">{{ scores_chart_json|safe }}</script>
 <script type="application/json" id="dash-json-performance-home">{{ perf_json|safe }}</script>
 <script type="application/json" id="dash-json-live-feed">{{ live_feed_json|safe }}</script>
+
+<section class="hero-globe card">
+  <div class="hero-globe__canvas" id="heroGlobeCanvas" aria-hidden="true"></div>
+  <div class="hero-globe__content">
+    <span class="hero-globe__eyebrow mono">Algorithmic Engine</span>
+    <h2>Live market intelligence with autonomous execution context</h2>
+    <p>Globe motion visualizes your signal engine heartbeat while your bot streams candles, strategy scores, and live trade activity in real time.</p>
+    <div class="hero-globe__chips">
+      <span class="pill">BTC + GOLD</span>
+      <span class="pill">Live Signals</span>
+      <span class="pill">24/7 Scanner</span>
+    </div>
+  </div>
+</section>
 
 <div class="grid">
   <div class="card">
