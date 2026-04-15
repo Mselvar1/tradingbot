@@ -41,6 +41,36 @@ MAX_CANDLES_5M = 60         # 5-minute candles for higher-TF context
 MAX_BTC_SPREAD_USD = 120.0
 
 
+def _passes_orderflow_gate(action: str, d: dict) -> tuple[bool, str]:
+    """
+    Optional Binance order-flow gate.
+    BUY needs bid-heavy imbalance; SELL needs ask-heavy imbalance.
+    """
+    if not getattr(settings, "btc_orderflow_gate_enabled", True):
+        return True, "disabled"
+
+    bn = d.get("binance") or {}
+    if not bn.get("ok"):
+        if getattr(settings, "btc_orderflow_require_fresh_snapshot", False):
+            return False, "order-flow unavailable"
+        return True, "unavailable (soft-pass)"
+
+    vol_ratio = float(bn.get("volume_ratio") or 0.0)
+    imbalance = float(bn.get("book_imbalance") or 0.0)
+    min_vol = float(getattr(settings, "btc_orderflow_min_volume_ratio", 1.0))
+    min_imb = float(getattr(settings, "btc_orderflow_min_imbalance", 0.05))
+
+    if vol_ratio < min_vol:
+        return False, f"volume_ratio {vol_ratio:.3f} < {min_vol:.3f}"
+
+    if action == "buy" and imbalance < min_imb:
+        return False, f"book_imbalance {imbalance:+.3f} < +{min_imb:.3f} for BUY"
+    if action == "sell" and imbalance > -min_imb:
+        return False, f"book_imbalance {imbalance:+.3f} > -{min_imb:.3f} for SELL"
+
+    return True, f"vol {vol_ratio:.2f}x | imbalance {imbalance:+.3f}"
+
+
 # ─── Technical Indicator Helpers ──────────────────────────────────────────────
 
 def _calc_ema(prices: list, period: int) -> float:
@@ -442,7 +472,8 @@ async def scan_btc(market_context: dict) -> dict | None:
         return None
 
     session, priority = get_btc_session()
-    if priority in ("low", "avoid"):
+    allow_low = getattr(settings, "btc_allow_low_priority_sessions", True)
+    if priority == "avoid" or (priority == "low" and not allow_low):
         print(f"BTC: session priority {priority} — skipped")
         return None
 
@@ -629,6 +660,12 @@ async def scan_btc(market_context: dict) -> dict | None:
         print(f"BTC: only {len(confluences)} confluence(s) — minimum 2 required, skipped")
         return None
 
+    of_ok, of_reason = _passes_orderflow_gate(action, d)
+    if not of_ok:
+        print(f"BTC: order-flow gate blocked — {of_reason}")
+        return None
+    print(f"BTC: order-flow gate passed — {of_reason}")
+
     return {
         "ticker": "BTC-USD",
         "action": action,
@@ -642,6 +679,9 @@ async def scan_btc(market_context: dict) -> dict | None:
         "bb_upper": d["bb_upper"], "bb_lower": d["bb_lower"],
         "vwap": d["vwap"], "vwap_position": d["vwap_position"],
         "volume_ratio": d["volume_ratio"],
+        "binance_volume_ratio": (d.get("binance") or {}).get("volume_ratio", "n/a"),
+        "book_imbalance": (d.get("binance") or {}).get("book_imbalance", "n/a"),
+        "book_imbalance_label": (d.get("binance") or {}).get("book_imbalance_label", "n/a"),
         "trend_5m": d["trend_5m"], "structure_5m": d["structure_5m"],
         "entry": result.get("entry_zone", [d["price"], d["price"]]),
         "entry_trigger": result.get("entry_trigger", "n/a"),
@@ -746,6 +786,9 @@ async def format_btc_signal(sig: dict) -> str:
         f"VWAP: {_p(sig.get('vwap',0))} ({sig.get('vwap_position','n/a')})\n"
         f"5m Trend: {sig.get('trend_5m','n/a')} | Structure: {sig.get('structure_5m','n/a')}\n"
         f"Volume: {sig.get('volume_ratio','n/a')}x — {sig.get('volume_signal','n/a')}\n"
+        f"Order flow: vol {sig.get('binance_volume_ratio','n/a')}x | "
+        f"imbalance {sig.get('book_imbalance','n/a')} "
+        f"({sig.get('book_imbalance_label','n/a')})\n"
         f"VIX: {sig.get('vix','n/a')} — {sig.get('regime','n/a')}\n"
         f"Fear & Greed: {sig.get('fear_greed','n/a')}/100 ({sig.get('fear_greed_label','n/a')})\n\n"
         f"SMC CONFLUENCES\n"
