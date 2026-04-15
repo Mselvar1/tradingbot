@@ -162,7 +162,7 @@
 </div>
 
 <h2 class="section-title">Live bot terminal</h2>
-<div class="terminal-shell" aria-label="Live scanner log terminal">
+<div class="terminal-shell terminal-floating" id="terminalShell" aria-label="Live scanner log terminal">
   <div class="terminal-head">
     <div class="terminal-lights">
       <span class="term-light red"></span>
@@ -170,8 +170,12 @@
       <span class="term-light green"></span>
     </div>
     <div class="terminal-title mono">DutchAlpha · live activity stream</div>
+    <div class="terminal-actions">
+      <button id="pauseScrollBtn" type="button" class="terminal-btn">Pause scroll</button>
+      <button id="toggleTerminalBtn" type="button" class="terminal-btn">Collapse</button>
+    </div>
   </div>
-  <div class="terminal-body">
+  <div class="terminal-body" id="terminalBody">
     <ul id="terminalFeedList" class="terminal-feed">
       {% for it in live_feed %}
       <li class="terminal-line mono">[{{ it.ts }}] {{ it.type|upper }} · {{ it.headline }} — {{ it.detail }}</li>

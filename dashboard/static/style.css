@@ -576,6 +576,12 @@ details.snap pre {
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45);
 }
 
+.terminal-floating {
+  position: sticky;
+  bottom: 0.65rem;
+  z-index: 6;
+}
+
 .terminal-head {
   display: flex;
   align-items: center;
@@ -616,9 +622,38 @@ details.snap pre {
   letter-spacing: 0.01em;
 }
 
+.terminal-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 0.45rem;
+}
+
+.terminal-btn {
+  border: 1px solid #4b5563;
+  background: #20242b;
+  color: #d1d5db;
+  border-radius: 7px;
+  padding: 0.2rem 0.52rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.terminal-btn:hover {
+  background: #2a2f37;
+}
+
+.terminal-btn.is-paused {
+  border-color: #a78bfa;
+  color: #c4b5fd;
+}
+
 .terminal-body {
   background: #0b1016;
   border-top: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.terminal-shell.is-collapsed .terminal-body {
+  display: none;
 }
 
 .terminal-feed {
