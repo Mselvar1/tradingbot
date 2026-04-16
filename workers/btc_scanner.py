@@ -462,7 +462,7 @@ async def scan_btc(market_context: dict) -> dict | None:
         print("BTC: no data — skipped")
         return None
 
-    if is_btc_choppy_window():
+    if not getattr(settings, "btc_scan_ignore_time_filters", True) and is_btc_choppy_window():
         print("BTC: session edge / first 6 UTC minutes — skipped")
         return None
 
@@ -473,7 +473,8 @@ async def scan_btc(market_context: dict) -> dict | None:
 
     session, priority = get_btc_session()
     allow_low = getattr(settings, "btc_allow_low_priority_sessions", True)
-    if priority == "avoid" or (priority == "low" and not allow_low):
+    ignore_time = getattr(settings, "btc_scan_ignore_time_filters", True)
+    if not ignore_time and (priority == "avoid" or (priority == "low" and not allow_low)):
         print(f"BTC: session priority {priority} — skipped")
         return None
 
@@ -825,12 +826,16 @@ async def format_btc_signal(sig: dict) -> str:
 async def run_btc_scanner(bot, chat_id: int):
     # Stagger startup so Gold scanner creates the Capital.com session first
     await asyncio.sleep(10)
-    print("BTC scalping scanner started (24/7 with dead-zone avoidance)...")
+    print(
+        "BTC scalping scanner started (24/7"
+        + (", time/session filters OFF" if getattr(settings, "btc_scan_ignore_time_filters", True) else ", dead-zone avoidance)")
+        + ")..."
+    )
     last_signal_time = None
 
     while True:
         try:
-            if should_scan_btc():
+            if getattr(settings, "btc_scan_ignore_time_filters", True) or should_scan_btc():
                 session, priority = get_btc_session()
                 print(f"Scanning BTC ({session} / {priority})...")
                 market_context = await get_market_context()

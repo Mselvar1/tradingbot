@@ -180,7 +180,7 @@ async def scan_gold(market_context: dict):
         print("Gold: circuit breaker pause — skipped")
         return None
 
-    if is_session_choppy_window():
+    if not getattr(settings, "gold_scan_ignore_time_filters", True) and is_session_choppy_window():
         print("Gold: session edge / first 6 UTC minutes — skipped")
         return None
 

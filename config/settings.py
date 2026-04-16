@@ -24,12 +24,17 @@ class Settings(BaseSettings):
     binance_skip_low_volume: bool = False
     min_binance_volume_ratio: float = 0.12
     # BTC order-flow gate (Binance) — applied before returning a tradeable signal
-    btc_orderflow_gate_enabled: bool = True
-    btc_orderflow_min_volume_ratio: float = 1.0
-    btc_orderflow_min_imbalance: float = 0.05
+    # When False, Binance flow is not required to confirm entries (more trades; noisier)
+    btc_orderflow_gate_enabled: bool = False
+    btc_orderflow_min_volume_ratio: float = 0.45
+    btc_orderflow_min_imbalance: float = 0.03
     btc_orderflow_require_fresh_snapshot: bool = False
     # If True, scanner can trade in "low" session priority (still skips "avoid")
     btc_allow_low_priority_sessions: bool = True
+    # When True, BTC scanner never sleeps for UTC dead zone / choppy windows / priority "avoid"
+    btc_scan_ignore_time_filters: bool = True
+    # When True, Gold scanner does not skip first-6-min-of-hour / session-edge choppy windows
+    gold_scan_ignore_time_filters: bool = True
     # Signal platform / validation / dashboard
     signal_platform_enabled: bool = True
     circuit_breaker_sl_streak: int = 8
