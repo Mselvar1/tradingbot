@@ -6,7 +6,6 @@ from config.settings import settings
 from datetime import datetime
 
 MAX_RISK_PER_TRADE_PCT = 0.02   # 2% of account balance risked per trade
-MAX_OPEN_TRADES = 3
 MIN_RR = 1.75
 MAX_STOP_PCT = 0.5              # stop loss must be within 0.5% of entry
 MIN_TP_PCT   = 0.22             # TP1 must be at least this % from entry (avoid tiny R)
@@ -36,9 +35,10 @@ class CapitalExecutor:
         balance = account.get("balance", 0)
         if balance == 0:
             return {"allowed": False, "reason": "Zero balance"}
-        if len(self.open_trades) >= MAX_OPEN_TRADES:
+        cap = max(1, int(getattr(settings, "max_open_trades", 8)))
+        if len(self.open_trades) >= cap:
             return {"allowed": False,
-                    "reason": f"Max {MAX_OPEN_TRADES} open trades reached"}
+                    "reason": f"Max {cap} open trades reached"}
         daily_loss_limit = balance * self.daily_loss_limit_pct
         if self.daily_pnl <= -daily_loss_limit:
             return {"allowed": False,

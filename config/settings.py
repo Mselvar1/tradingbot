@@ -37,9 +37,15 @@ class Settings(BaseSettings):
     gold_scan_ignore_time_filters: bool = True
     # When False, Gold scanner worker is not started (BTC-focused mode; reduces Claude + bad Gold exposure)
     gold_scanner_enabled: bool = False
+    # Capital.com executor: max simultaneous opens (local tracker; increase for high-frequency mode)
+    max_open_trades: int = 8
+    # Shared Claude budget (entries + trade reviews). Raise if you want ≥~10 BTC trades/hour.
+    claude_max_calls_per_hour: int = 120
+    # Trade manager: seconds between Claude reviews per open position (lower = more API use)
+    trade_review_interval_seconds: int = 600
     # BTC: faster cadence and looser gates (still bounded by claude_limiter)
-    btc_scan_interval_seconds: int = 90
-    btc_min_signal_gap_seconds: int = 240
+    btc_scan_interval_seconds: int = 30
+    btc_min_signal_gap_seconds: int = 300
     btc_min_confidence: int = 55
     btc_max_confidence_cap: int = 68
     btc_min_confluences: int = 1
