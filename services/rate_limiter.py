@@ -1,11 +1,13 @@
 """
-Shared Claude API rate limiter — sliding window, max 20 calls/hour total
-across all scanners. Both Gold and BTC check this before calling Claude.
+Shared Claude API rate limiter — sliding window, max N calls/hour (configurable)
+across scanners and trade-manager reviews.
 """
 
 import asyncio
 import datetime
 from collections import deque
+
+from config.settings import settings
 
 
 class ClaudeRateLimiter:
@@ -53,5 +55,9 @@ class ClaudeRateLimiter:
         return len(self._calls), self.max_calls
 
 
-# Singleton — imported by both scanners
-claude_limiter = ClaudeRateLimiter(max_calls=20, window_seconds=3600)
+def _limiter_max() -> int:
+    return max(20, int(getattr(settings, "claude_max_calls_per_hour", 120)))
+
+
+# Singleton — max calls/hour from settings (default 120)
+claude_limiter = ClaudeRateLimiter(max_calls=_limiter_max(), window_seconds=3600)

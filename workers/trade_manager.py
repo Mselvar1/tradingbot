@@ -10,7 +10,7 @@ Decision hierarchy (applied in order):
   4. 3+ consecutive against      → exit 50% (full if partial fails)
   5. RSI divergence + weak mom   → exit
   6. 2-hour no-progress trap     → exit at market
-  7. Claude review (every 5 min) → HOLD / TAKE_PARTIAL_PROFIT / MOVE_STOP / EXIT_NOW
+  7. Claude review (interval from TRADE_REVIEW_INTERVAL_SECONDS) → HOLD / …
 
 All exits are saved to trade_exits table and announced via Telegram.
 """
@@ -27,9 +27,14 @@ from services.rate_limiter import claude_limiter
 from services.risk import risk
 from claude.client import review_trade
 from claude.prompts.trade_review import TRADE_REVIEW_PROMPT
+from config.settings import settings
 
-MONITOR_INTERVAL    = 60   # seconds between position checks
-CLAUDE_REVIEW_SECS  = 300  # 5 minutes between Claude reviews per trade
+MONITOR_INTERVAL = 60   # seconds between position checks
+
+
+def _claude_review_interval() -> float:
+    """Spread out position reviews so entry Claude calls can hit ~10+/hour."""
+    return float(getattr(settings, "trade_review_interval_seconds", 600))
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -483,9 +488,9 @@ async def run_trade_manager(bot, chat_id: int):
                                         current, bot, chat_id)
                     continue
 
-                # ── 9. Claude review every 5 minutes ──────────────────────
+                # ── 9. Claude review (interval from settings; default 10 min) ─
                 last_review = entry_data.get("last_claude_review", 0.0)
-                if now - last_review >= CLAUDE_REVIEW_SECS:
+                if now - last_review >= _claude_review_interval():
                     trade_store.update(deal_id, last_claude_review=now)
                     if await claude_limiter.acquire("TRADE_REVIEW"):
                         await _claude_review(deal_id, pos, entry_data,
