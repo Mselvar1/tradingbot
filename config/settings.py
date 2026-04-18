@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     btc_scan_ignore_time_filters: bool = True
     # When True, Gold scanner does not skip first-6-min-of-hour / session-edge choppy windows
     gold_scan_ignore_time_filters: bool = True
+    # When False, Gold scanner worker is not started (BTC-focused mode; reduces Claude + bad Gold exposure)
+    gold_scanner_enabled: bool = False
+    # BTC: faster cadence and looser gates (still bounded by claude_limiter)
+    btc_scan_interval_seconds: int = 90
+    btc_min_signal_gap_seconds: int = 240
+    btc_min_confidence: int = 55
+    btc_max_confidence_cap: int = 68
+    btc_min_confluences: int = 1
+    btc_strict_ema_stack: bool = False
+    btc_relax_setup_score: bool = True
+    btc_relax_prefilter: bool = True
     # Signal platform / validation / dashboard
     signal_platform_enabled: bool = True
     circuit_breaker_sl_streak: int = 8

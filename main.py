@@ -38,7 +38,10 @@ async def post_init(app):
         BotCommand("help",       "All commands"),
     ])
     chat_id = settings.allowed_ids[0]
-    asyncio.create_task(run_scanner(app.bot, chat_id))
+    if getattr(settings, "gold_scanner_enabled", True):
+        asyncio.create_task(run_scanner(app.bot, chat_id))
+    else:
+        print("Gold scanner disabled (GOLD_SCANNER_ENABLED=false) — BTC-only mode")
     asyncio.create_task(run_btc_scanner(app.bot, chat_id))
     asyncio.create_task(run_position_monitor(app.bot, chat_id))
     asyncio.create_task(run_trade_manager(app.bot, chat_id))
@@ -48,7 +51,9 @@ async def post_init(app):
     asyncio.create_task(run_signal_platform_scheduler(app.bot, chat_id))
     asyncio.create_task(run_weekly_report(app.bot, chat_id))
     print(
-        "All workers started: scanners, position monitor, trade manager, price tracker, "
+        "All workers started: "
+        + ("gold scanner, " if getattr(settings, "gold_scanner_enabled", True) else "")
+        + "position monitor, trade manager, price tracker, "
         "Binance flow, candle feed, signal platform, weekly report — "
         f"chat_id: {chat_id}"
     )

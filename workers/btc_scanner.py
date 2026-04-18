@@ -30,15 +30,21 @@ _BTC_EPIC_CANDIDATES = [
 ]
 _btc_candle_epic: str | None = None
 
-SCAN_INTERVAL = 300         # scan every 5 minutes
-CONFIDENCE_THRESHOLD = 75   # minimum confidence to place a trade
-NOTIFY_THRESHOLD = 75       # minimum confidence to send analysis to Telegram
+CONFIDENCE_THRESHOLD = 68   # reference only; use settings btc_min_confidence / btc_max_confidence_cap
+NOTIFY_THRESHOLD = 58       # minimum confidence to send full analysis to Telegram
 STRONG_VERDICTS = {"STRONG BUY", "STRONG SELL"}   # always notify regardless of score
-MIN_SIGNAL_GAP = 600        # 10 minutes between signals
 MAX_CANDLES_1M = 150        # 1-minute candles for scalp indicators
 MAX_CANDLES_5M = 60         # 5-minute candles for higher-TF context
 # Skip trades when bid/offer spread (USD) is wider than this (Capital.com / CFD)
 MAX_BTC_SPREAD_USD = 120.0
+
+
+def _btc_scan_interval() -> int:
+    return max(45, int(getattr(settings, "btc_scan_interval_seconds", 90)))
+
+
+def _btc_min_gap() -> int:
+    return max(60, int(getattr(settings, "btc_min_signal_gap_seconds", 240)))
 
 
 def _passes_orderflow_gate(action: str, d: dict) -> tuple[bool, str]:
@@ -442,7 +448,8 @@ def has_btc_setup(d: dict) -> bool:
     if bn.get("ok") and (bn.get("volume_ratio") or 0) > 1.25:
         score += 1
 
-    return score >= 2
+    need = 1 if getattr(settings, "btc_relax_setup_score", True) else 2
+    return score >= need
 
 
 # ─── Main Scan ────────────────────────────────────────────────────────────────
@@ -500,23 +507,36 @@ async def scan_btc(market_context: dict) -> dict | None:
         print("BTC: no setup — skipped")
         return None
 
-    # Claude pre-filter: only analyse when conditions are actually extreme
-    rsi_extreme    = d["rsi"] < 35 or d["rsi"] > 65
-    price_moving   = abs(d.get("price_change_5m", 0)) > 0.5
-    if not (rsi_extreme or price_moving):
-        print(
-            f"BTC: pre-filter skipped "
-            f"(RSI={d['rsi']} change5m={d.get('price_change_5m', 0):+.3f}%)"
-        )
-        return None
+    # Claude pre-filter — relaxed mode allows BB touch + smaller 5m move
+    if getattr(settings, "btc_relax_prefilter", True):
+        rsi_extreme = d["rsi"] < 38 or d["rsi"] > 62
+        price_moving = abs(d.get("price_change_5m", 0)) > 0.25
+        bb_edge = d.get("bb_context") in ("upper_band", "lower_band")
+        if not (rsi_extreme or price_moving or bb_edge):
+            print(
+                f"BTC: pre-filter skipped "
+                f"(RSI={d['rsi']} change5m={d.get('price_change_5m', 0):+.3f}% bb={d.get('bb_context')})"
+            )
+            return None
+    else:
+        rsi_extreme = d["rsi"] < 35 or d["rsi"] > 65
+        price_moving = abs(d.get("price_change_5m", 0)) > 0.5
+        if not (rsi_extreme or price_moving):
+            print(
+                f"BTC: pre-filter skipped "
+                f"(RSI={d['rsi']} change5m={d.get('price_change_5m', 0):+.3f}%)"
+            )
+            return None
 
     if not await claude_limiter.acquire("BTC"):
         return None
 
-    # Dynamic threshold: may be adjusted by historical session performance
-    threshold = await get_dynamic_threshold("BTC-USD", session)
-    if threshold != CONFIDENCE_THRESHOLD:
-        print(f"BTC: dynamic threshold {threshold} (default {CONFIDENCE_THRESHOLD})")
+    # Dynamic threshold, clamped so learning cannot force 75+ during losing streaks forever
+    dynamic = await get_dynamic_threshold("BTC-USD", session)
+    floor = int(getattr(settings, "btc_min_confidence", 55))
+    cap = int(getattr(settings, "btc_max_confidence_cap", 68))
+    threshold = max(floor, min(dynamic, cap))
+    print(f"BTC: confidence threshold {threshold} (dynamic={dynamic}, floor={floor}, cap={cap})")
 
     learned_patterns = await get_prompt_injection("BTC-USD")
 
@@ -646,19 +666,26 @@ async def scan_btc(market_context: dict) -> dict | None:
         td = result.get("trend_direction", "neutral")
         action = "buy" if td == "bullish" else "sell"
 
-    # EMA alignment filter: only trade with EMA stack direction
     ema_align = d.get("ema_alignment", "mixed")
-    if action == "buy" and ema_align != "bullish_stack":
-        print(f"BTC: BUY rejected — EMA alignment is {ema_align}, need bullish_stack")
-        return None
-    if action == "sell" and ema_align != "bearish_stack":
-        print(f"BTC: SELL rejected — EMA alignment is {ema_align}, need bearish_stack")
-        return None
+    if getattr(settings, "btc_strict_ema_stack", False):
+        if action == "buy" and ema_align != "bullish_stack":
+            print(f"BTC: BUY rejected — EMA alignment is {ema_align}, need bullish_stack")
+            return None
+        if action == "sell" and ema_align != "bearish_stack":
+            print(f"BTC: SELL rejected — EMA alignment is {ema_align}, need bearish_stack")
+            return None
+    else:
+        if action == "buy" and ema_align == "bearish_stack":
+            print(f"BTC: BUY rejected — EMA alignment is bearish_stack (counter-trend)")
+            return None
+        if action == "sell" and ema_align == "bullish_stack":
+            print(f"BTC: SELL rejected — EMA alignment is bullish_stack (counter-trend)")
+            return None
 
-    # Minimum 2 SMC confluences required
+    min_conf = int(getattr(settings, "btc_min_confluences", 1))
     confluences = result.get("confluences", [])
-    if len(confluences) < 2:
-        print(f"BTC: only {len(confluences)} confluence(s) — minimum 2 required, skipped")
+    if len(confluences) < min_conf:
+        print(f"BTC: only {len(confluences)} confluence(s) — minimum {min_conf} required, skipped")
         return None
 
     of_ok, of_reason = _passes_orderflow_gate(action, d)
@@ -829,7 +856,7 @@ async def run_btc_scanner(bot, chat_id: int):
     print(
         "BTC scalping scanner started (24/7"
         + (", time/session filters OFF" if getattr(settings, "btc_scan_ignore_time_filters", True) else ", dead-zone avoidance)")
-        + ")..."
+        + f", interval={_btc_scan_interval()}s gap={_btc_min_gap()}s)..."
     )
     last_signal_time = None
 
@@ -841,9 +868,9 @@ async def run_btc_scanner(bot, chat_id: int):
                 market_context = await get_market_context()
 
                 now = datetime.datetime.utcnow().timestamp()
-                if last_signal_time and (now - last_signal_time) < MIN_SIGNAL_GAP:
+                if last_signal_time and (now - last_signal_time) < _btc_min_gap():
                     print("BTC: cooldown active — waiting")
-                    await asyncio.sleep(SCAN_INTERVAL)
+                    await asyncio.sleep(_btc_scan_interval())
                     continue
 
                 signal = await scan_btc(market_context)
@@ -902,7 +929,7 @@ async def run_btc_scanner(bot, chat_id: int):
             else:
                 print("BTC: dead zone (02:00-05:00 UTC) — sleeping")
 
-            await asyncio.sleep(SCAN_INTERVAL)
+            await asyncio.sleep(_btc_scan_interval())
         except Exception as e:
             print(f"BTC scanner error: {e}")
-            await asyncio.sleep(SCAN_INTERVAL)
+            await asyncio.sleep(_btc_scan_interval())

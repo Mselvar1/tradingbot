@@ -7,9 +7,9 @@ from datetime import datetime
 
 MAX_RISK_PER_TRADE_PCT = 0.02   # 2% of account balance risked per trade
 MAX_OPEN_TRADES = 3
-MIN_RR = 1.6
+MIN_RR = 1.75
 MAX_STOP_PCT = 0.5              # stop loss must be within 0.5% of entry
-MIN_TP_PCT   = 0.2              # TP1 must be at least 0.2% from entry
+MIN_TP_PCT   = 0.22             # TP1 must be at least this % from entry (avoid tiny R)
 
 
 class CapitalExecutor:

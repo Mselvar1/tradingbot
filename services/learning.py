@@ -34,7 +34,7 @@ from services.memory import (
 # ─── Defaults ──────────────────────────────────────────────────────────────────
 
 DEFAULT_THRESHOLD_GOLD = 60
-DEFAULT_THRESHOLD_BTC  = 58
+DEFAULT_THRESHOLD_BTC  = 55
 _TRIGGER_ANALYSIS_EVERY = 5   # run pattern analysis after this many new outcomes
 
 # ─── In-Memory State ────────────────────────────────────────────────────────────
