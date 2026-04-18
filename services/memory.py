@@ -421,6 +421,73 @@ async def fetch_performance_dashboard(limit_recent: int = 50) -> dict:
     return out
 
 
+async def fetch_btc_window_performance(hours: int = 8) -> dict:
+    """
+    BTC-USD stats for the last `hours` hours only (not all-time).
+    Uses outcomes (pipeline closes) + trade_exits (managed closes with € PnL).
+    """
+    out: dict = {
+        "hours": hours,
+        "outcomes_n": 0,
+        "wins": 0,
+        "losses": 0,
+        "other": 0,
+        "win_rate": 0.0,
+        "avg_pnl_pct": None,
+        "trade_exits_n": 0,
+        "net_pnl_euros": None,
+    }
+    try:
+        pool = await get_pool()
+        cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=hours)
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*)::int AS n,
+                    COUNT(*) FILTER (WHERE result IN ('tp1', 'tp2', 'tp3'))::int AS wins,
+                    COUNT(*) FILTER (WHERE result = 'sl')::int AS losses,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(result, '') NOT IN ('tp1', 'tp2', 'tp3', 'sl')
+                    )::int AS other,
+                    AVG(pnl_pct)::float AS avg_pnl_pct
+                FROM outcomes
+                WHERE (ticker ILIKE '%BTC%' OR ticker = 'BTC-USD')
+                  AND created_at >= $1
+                """,
+                cutoff,
+            )
+            if row:
+                n = int(row["n"] or 0)
+                w = int(row["wins"] or 0)
+                out["outcomes_n"] = n
+                out["wins"] = w
+                out["losses"] = int(row["losses"] or 0)
+                out["other"] = int(row["other"] or 0)
+                out["win_rate"] = round(w / n * 100, 1) if n else 0.0
+                ap = row["avg_pnl_pct"]
+                out["avg_pnl_pct"] = round(float(ap), 4) if ap is not None else None
+
+            ex = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*)::int AS n,
+                    COALESCE(SUM(pnl_euros), 0)::float AS net_eur
+                FROM trade_exits
+                WHERE (ticker ILIKE '%BTC%' OR ticker = 'BTC-USD')
+                  AND created_at >= $1
+                """,
+                cutoff,
+            )
+            if ex:
+                out["trade_exits_n"] = int(ex["n"] or 0)
+                ne = ex["net_eur"]
+                out["net_pnl_euros"] = round(float(ne), 2) if ne is not None else None
+    except Exception as e:
+        print(f"fetch_btc_window_performance error: {e}")
+    return out
+
+
 async def save_trade_exit(exit_data: dict) -> int:
     """Save a managed trade exit to the trade_exits table."""
     try:

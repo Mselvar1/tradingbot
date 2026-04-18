@@ -13,6 +13,7 @@ from workers.btc_scanner import run_btc_scanner
 from workers.position_monitor import run_position_monitor
 from workers.trade_manager import run_trade_manager
 from workers.weekly_report import run_weekly_report
+from workers.btc_performance_digest import run_btc_performance_digest
 from workers.candle_feed import run_candle_feed
 from workers.signal_platform_scheduler import run_signal_platform_scheduler
 from services.price_tracker import run_price_tracker
@@ -50,11 +51,15 @@ async def post_init(app):
     asyncio.create_task(run_candle_feed())
     asyncio.create_task(run_signal_platform_scheduler(app.bot, chat_id))
     asyncio.create_task(run_weekly_report(app.bot, chat_id))
+    if getattr(settings, "btc_performance_digest_enabled", True):
+        asyncio.create_task(run_btc_performance_digest(app.bot, chat_id))
     print(
         "All workers started: "
         + ("gold scanner, " if getattr(settings, "gold_scanner_enabled", True) else "")
         + "position monitor, trade manager, price tracker, "
-        "Binance flow, candle feed, signal platform, weekly report — "
+        "Binance flow, candle feed, signal platform, weekly report"
+        + (", BTC digest" if getattr(settings, "btc_performance_digest_enabled", True) else "")
+        + " — "
         f"chat_id: {chat_id}"
     )
 

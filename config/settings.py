@@ -47,9 +47,14 @@ class Settings(BaseSettings):
     # Trade manager: Claude review spacing per position (BTC vs non-BTC)
     btc_trade_review_interval_seconds: int = 600
     gold_trade_review_interval_seconds: int = 300
+    # Telegram: rolling BTC performance (last N hours), not all-time
+    btc_performance_digest_enabled: bool = True
+    btc_performance_digest_hours: int = 8
+    btc_performance_digest_startup_delay_seconds: int = 300
     # BTC: faster cadence and looser gates (bounded by btc_claude_max_calls_per_hour)
     btc_scan_interval_seconds: int = 30
-    btc_min_signal_gap_seconds: int = 300
+    # 360s gap ≈ max 10 BTC entries/hour if every attempt fills (theoretical ceiling)
+    btc_min_signal_gap_seconds: int = 360
     btc_min_confidence: int = 55
     btc_max_confidence_cap: int = 68
     btc_min_confluences: int = 1
