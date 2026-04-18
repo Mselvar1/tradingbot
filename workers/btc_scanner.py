@@ -10,7 +10,7 @@ from services.execution.capital_executor import executor
 from services.memory import save_signal, get_memory_context
 from claude.client import analyse_btc as analyse
 from claude.prompts.btc_analysis import BTC_ANALYSIS_PROMPT
-from services.rate_limiter import claude_limiter
+from services.rate_limiter import claude_limiter_btc
 from services.learning import get_dynamic_threshold, get_prompt_injection, register_trade_signal
 from services.price_tracker import price_tracker
 from services.trade_store import trade_store
@@ -528,7 +528,7 @@ async def scan_btc(market_context: dict) -> dict | None:
             )
             return None
 
-    if not await claude_limiter.acquire("BTC"):
+    if not await claude_limiter_btc.acquire("BTC"):
         return None
 
     # Dynamic threshold, clamped so learning cannot force 75+ during losing streaks forever

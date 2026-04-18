@@ -1,6 +1,7 @@
 """
-Shared Claude API rate limiter — sliding window, max N calls/hour (configurable)
-across scanners and trade-manager reviews.
+Claude API rate limiters — separate hourly buckets:
+- BTC scanner uses claude_limiter_btc (btc_claude_max_calls_per_hour)
+- Gold scanner + trade-manager reviews share claude_limiter_shared (claude_shared_max_calls_per_hour)
 """
 
 import asyncio
@@ -14,7 +15,7 @@ class ClaudeRateLimiter:
     def __init__(self, max_calls: int = 20, window_seconds: int = 3600):
         self.max_calls = max_calls
         self.window = window_seconds
-        self._calls: deque = deque()   # timestamps of recent calls
+        self._calls: deque = deque()
         self._lock: asyncio.Lock | None = None
 
     @property
@@ -29,10 +30,6 @@ class ClaudeRateLimiter:
             self._calls.popleft()
 
     async def acquire(self, scanner: str = "") -> bool:
-        """
-        Returns True and records the call if within the rate limit.
-        Returns False (and logs) if the hourly cap has been reached.
-        """
         async with self._get_lock:
             now = datetime.datetime.utcnow().timestamp()
             self._prune(now)
@@ -49,15 +46,21 @@ class ClaudeRateLimiter:
             return True
 
     def usage(self) -> tuple[int, int]:
-        """Returns (calls_used, max_calls) for the current window."""
         now = datetime.datetime.utcnow().timestamp()
         self._prune(now)
         return len(self._calls), self.max_calls
 
 
-def _limiter_max() -> int:
-    return max(20, int(getattr(settings, "claude_max_calls_per_hour", 120)))
+def _btc_max() -> int:
+    return max(10, int(getattr(settings, "btc_claude_max_calls_per_hour", 120)))
 
 
-# Singleton — max calls/hour from settings (default 120)
-claude_limiter = ClaudeRateLimiter(max_calls=_limiter_max(), window_seconds=3600)
+def _shared_max() -> int:
+    return max(5, int(getattr(settings, "claude_shared_max_calls_per_hour", 24)))
+
+
+claude_limiter_btc = ClaudeRateLimiter(max_calls=_btc_max(), window_seconds=3600)
+claude_limiter_shared = ClaudeRateLimiter(max_calls=_shared_max(), window_seconds=3600)
+
+# Back-compat alias: shared pool (Gold + reviews)
+claude_limiter = claude_limiter_shared

@@ -21,7 +21,7 @@ class CapitalExecutor:
     async def get_account(self) -> dict:
         return await capital_client.get_account_balance()
 
-    async def can_trade(self) -> dict:
+    async def can_trade(self, ticker: str | None = None) -> dict:
         if risk.kill_switch:
             return {"allowed": False, "reason": "Kill switch is active. Trading halted."}
         if await is_paused():
@@ -35,10 +35,23 @@ class CapitalExecutor:
         balance = account.get("balance", 0)
         if balance == 0:
             return {"allowed": False, "reason": "Zero balance"}
-        cap = max(1, int(getattr(settings, "max_open_trades", 8)))
-        if len(self.open_trades) >= cap:
-            return {"allowed": False,
-                    "reason": f"Max {cap} open trades reached"}
+        t = (ticker or "").upper()
+        if t == "BTC-USD" or "BTC" in t:
+            cap = max(1, int(getattr(settings, "btc_max_open_trades", 8)))
+            n = sum(1 for tr in self.open_trades.values() if (tr.get("ticker") or "").upper() in ("BTC-USD", "BTC"))
+            if n >= cap:
+                return {"allowed": False,
+                        "reason": f"Max {cap} open BTC trades reached"}
+        else:
+            cap = max(1, int(getattr(settings, "max_open_trades", 3)))
+            n = sum(
+                1
+                for tr in self.open_trades.values()
+                if (tr.get("ticker") or "").upper() not in ("BTC-USD", "BTC")
+            )
+            if n >= cap:
+                return {"allowed": False,
+                        "reason": f"Max {cap} open non-BTC trades reached"}
         daily_loss_limit = balance * self.daily_loss_limit_pct
         if self.daily_pnl <= -daily_loss_limit:
             return {"allowed": False,
@@ -70,12 +83,12 @@ class CapitalExecutor:
         return round(max(0.01, size), 3)
 
     async def place_trade(self, signal: dict) -> dict:
-        check = await self.can_trade()
+        ticker = signal.get("ticker") or ""
+        check = await self.can_trade(ticker)
         if not check["allowed"]:
             return {"status": "blocked", "reason": check["reason"]}
 
         balance = check["balance"]
-        ticker = signal["ticker"]
         epic = get_epic(ticker)
         action = signal["action"]
         entry = signal.get("entry", [0, 0])

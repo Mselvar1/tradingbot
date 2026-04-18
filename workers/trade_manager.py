@@ -32,9 +32,12 @@ from config.settings import settings
 MONITOR_INTERVAL = 60   # seconds between position checks
 
 
-def _claude_review_interval() -> float:
-    """Spread out position reviews so entry Claude calls can hit ~10+/hour."""
-    return float(getattr(settings, "trade_review_interval_seconds", 600))
+def _claude_review_interval_seconds(ticker: str) -> float:
+    """BTC vs non-BTC review cadence (BTC-only aggressive settings stay on BTC)."""
+    t = (ticker or "").upper()
+    if "BTC" in t:
+        return float(getattr(settings, "btc_trade_review_interval_seconds", 600))
+    return float(getattr(settings, "gold_trade_review_interval_seconds", 300))
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -490,7 +493,7 @@ async def run_trade_manager(bot, chat_id: int):
 
                 # ── 9. Claude review (interval from settings; default 10 min) ─
                 last_review = entry_data.get("last_claude_review", 0.0)
-                if now - last_review >= _claude_review_interval():
+                if now - last_review >= _claude_review_interval_seconds(ticker):
                     trade_store.update(deal_id, last_claude_review=now)
                     if await claude_limiter.acquire("TRADE_REVIEW"):
                         await _claude_review(deal_id, pos, entry_data,
