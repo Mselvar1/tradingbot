@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     btc_scan_interval_seconds: int = 30
     # 360s gap ≈ max 10 BTC entries/hour if every attempt fills (theoretical ceiling)
     btc_min_signal_gap_seconds: int = 360
+    # Executor: minimum TP1 distance % for BTC (broker safety); R:R comes from signal if reward > risk
+    btc_min_tp_pct: float = 0.01
     btc_min_confidence: int = 55
     btc_max_confidence_cap: int = 68
     btc_min_confluences: int = 1

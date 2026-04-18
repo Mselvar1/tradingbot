@@ -8,7 +8,12 @@ from datetime import datetime
 MAX_RISK_PER_TRADE_PCT = 0.02   # 2% of account balance risked per trade
 MIN_RR = 1.75
 MAX_STOP_PCT = 0.5              # stop loss must be within 0.5% of entry
-MIN_TP_PCT   = 0.22             # TP1 must be at least this % from entry (avoid tiny R)
+MIN_TP_PCT   = 0.22             # TP1 must be at least this % from entry (avoid tiny R) — non-BTC only
+
+
+def _is_btc_ticker(ticker: str) -> bool:
+    t = (ticker or "").upper()
+    return t in ("BTC-USD", "BTC") or "BTC" in t
 
 
 class CapitalExecutor:
@@ -96,15 +101,10 @@ class CapitalExecutor:
         tp1 = signal.get("tp1", 0)
         rr = signal.get("rr", 0)
 
-        # rr can arrive as a string ("n/a") from Claude — handle safely
         try:
             rr_val = float(rr)
         except (TypeError, ValueError):
             rr_val = 0.0
-
-        if rr_val < MIN_RR:
-            return {"status": "blocked",
-                    "reason": f"R:R {rr} below minimum {MIN_RR}"}
 
         entry_price = entry[0] if isinstance(entry, list) else entry
         try:
@@ -118,7 +118,7 @@ class CapitalExecutor:
             return {"status": "blocked", "reason": "Invalid entry/stop/tp levels"}
 
         stop_distance_pct = abs(entry_price - stop_loss) / entry_price * 100
-        tp1_distance_pct  = abs(tp1 - entry_price) / entry_price * 100
+        tp1_distance_pct = abs(tp1 - entry_price) / entry_price * 100
 
         if stop_distance_pct > MAX_STOP_PCT:
             return {
@@ -126,16 +126,42 @@ class CapitalExecutor:
                 "reason": (
                     f"Stop distance {stop_distance_pct:.3f}% exceeds max {MAX_STOP_PCT}% — "
                     f"stop too wide"
-                )
+                ),
             }
-        if tp1_distance_pct < MIN_TP_PCT:
-            return {
-                "status": "blocked",
-                "reason": (
-                    f"TP1 distance {tp1_distance_pct:.3f}% below minimum {MIN_TP_PCT}% — "
-                    f"target too close"
-                )
-            }
+
+        is_btc = _is_btc_ticker(ticker)
+        if is_btc:
+            # Model chooses R:R; we only enforce reward distance > risk distance
+            if tp1_distance_pct <= stop_distance_pct:
+                return {
+                    "status": "blocked",
+                    "reason": (
+                        f"BTC: TP distance {tp1_distance_pct:.3f}% must exceed SL distance "
+                        f"{stop_distance_pct:.3f}% (reward > risk)"
+                    ),
+                }
+            btc_floor = float(getattr(settings, "btc_min_tp_pct", 0.01))
+            if tp1_distance_pct < btc_floor:
+                return {
+                    "status": "blocked",
+                    "reason": (
+                        f"BTC: TP1 distance {tp1_distance_pct:.3f}% below minimum {btc_floor}%"
+                    ),
+                }
+        else:
+            if rr_val < MIN_RR:
+                return {
+                    "status": "blocked",
+                    "reason": f"R:R {rr} below minimum {MIN_RR}",
+                }
+            if tp1_distance_pct < MIN_TP_PCT:
+                return {
+                    "status": "blocked",
+                    "reason": (
+                        f"TP1 distance {tp1_distance_pct:.3f}% below minimum {MIN_TP_PCT}% — "
+                        f"target too close"
+                    ),
+                }
 
         size = self.calculate_size(balance, entry_price, stop_distance_pct)
 
